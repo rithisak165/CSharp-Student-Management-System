@@ -82,7 +82,6 @@ namespace StudentManagementSystem
             string email = Console.ReadLine();
             Console.Write("Password: ");
             string password = Console.ReadLine();
-
             try
             {
                 using (var conn = DbHelper.GetConnection())
@@ -160,14 +159,16 @@ namespace StudentManagementSystem
             Console.WriteLine("=== STUDENT DASHBOARD ===");
             Console.WriteLine("1. View My Scores & Grades");
             Console.WriteLine("2. View My Attendance");
-            Console.WriteLine("3. Logout");
+            Console.WriteLine("3. View Academic Report");
+            Console.WriteLine("4. Logout");
             Console.Write("Select: ");
 
             switch (Console.ReadLine())
             {
                 case "1": ViewMyScores(); break;
                 case "2": ViewMyAttendance(); break;
-                case "3": currentUser = null; break;
+                case "3": ViewAcademicReport();break;
+                case "4": currentUser = null; break;
                 default: Console.WriteLine("Invalid option."); break;
             }
         }
@@ -297,21 +298,26 @@ namespace StudentManagementSystem
                     conn.Open();
                     // Find Student ID
                     int studentId = GetStudentIdByCode(conn, code);
-                    if (studentId == 0) return;
+                    if (studentId == 0) return; // Student not found, exit
 
                     Console.WriteLine("Enter Scores (0-100):");
-                    Console.Write("Python: "); float py = float.Parse(Console.ReadLine());
-                    Console.Write("OOP: "); float oop = float.Parse(Console.ReadLine());
-                    Console.Write("Writing II: "); float writ = float.Parse(Console.ReadLine());
-                    Console.Write("DB System: "); float db = float.Parse(Console.ReadLine());
-                    Console.Write("Microprocessor: "); float micro = float.Parse(Console.ReadLine());
-                    Console.Write("Network: "); float net = float.Parse(Console.ReadLine());
-                    Console.Write("English: "); float eng = float.Parse(Console.ReadLine());
+
+                    // --- CHANGED SECTION START ---
+                    // We use the helper function GetValidScore for each subject
+                    // This ensures if Python is wrong, it asks for Python again immediately.
+                    float py = GetValidScore("Python");
+                    float oop = GetValidScore("OOP");
+                    float writ = GetValidScore("Writing II");
+                    float db = GetValidScore("DB System");
+                    float micro = GetValidScore("Microprocessor");
+                    float net = GetValidScore("Network");
+                    float eng = GetValidScore("English");
+                    // --- CHANGED SECTION END ---
 
                     string sql = @"UPDATE Scores SET 
-                                   Python=@py, OOP_OOM=@oop, WritingII=@writ, 
-                                   DatabaseSystem=@db, Microprocessor=@micro, Network=@net, CoreEnglish=@eng 
-                                   WHERE StudentId=@sid";
+                           Python=@py, OOP_OOM=@oop, WritingII=@writ, 
+                           DatabaseSystem=@db, Microprocessor=@micro, Network=@net, CoreEnglish=@eng 
+                           WHERE StudentId=@sid";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
@@ -328,15 +334,39 @@ namespace StudentManagementSystem
                     Console.WriteLine("Scores Updated Successfully.");
                 }
             }
-            catch (Exception ex) { Console.WriteLine("Error: " + ex.Message); }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error: " + ex.Message);
+            }
             Console.ReadKey();
         }
 
+        // --- NEW HELPER FUNCTION ---
+        // This function handles the "Ask again immediately" logic
+        static float GetValidScore(string subjectName)
+        {
+            float score;
+            while (true) // Infinite loop until valid input
+            {
+                Console.Write($"{subjectName}: ");
+                string input = Console.ReadLine();
+
+                // 1. Check if input is a valid number (float.TryParse)
+                // 2. Check if number is between 0 and 100
+                if (float.TryParse(input, out score) && score >= 0 && score <= 100)
+                {
+                    return score; // Input is good, return it and exit the loop
+                }
+
+                // If we get here, the input was wrong
+                Console.WriteLine($"Error: {subjectName} score must be between 0 and 100. Please try again.");
+            }
+        }
         static void RecordAttendance()
         {
             Console.WriteLine("\n-- Record Attendance --");
 
-            // 1. Select Subject (No changes here, keeping your menu)
+            // 1. Select Subject
             string[] subjects = { "Python", "OOP_OOM", "WritingII", "DatabaseSystem", "Microprocessor", "Network", "CoreEnglish" };
 
             Console.WriteLine("Select Subject:");
@@ -353,10 +383,13 @@ namespace StudentManagementSystem
             }
             string selectedSubject = subjects[choice - 1];
 
-            // 2. AUTOMATIC DATE (No User Input)
-            DateTime date = DateTime.Now;
+            // 2. AUTOMATIC DATE (Fixed)
+            // We use DateTime.Today instead of Now to get '2025-12-25 00:00:00'
+            // This ensures re-running the tool on the same day updates the existing record instead of creating a duplicate.
+            DateTime date = DateTime.Today;
+
             Console.WriteLine($"\nRecording Attendance for: {selectedSubject}");
-            Console.WriteLine($"Date: {date:yyyy-MM-dd}"); // Show user the auto-date
+            Console.WriteLine($"Date: {date:yyyy-MM-dd}");
 
             try
             {
@@ -366,13 +399,18 @@ namespace StudentManagementSystem
 
                     // Get all students
                     var students = new List<Student>();
-                    string sql = "SELECT StudentId, FullName FROM Students";
+                    string sql = "SELECT StudentId, FullName FROM Students ORDER BY StudentCode ASC";
+
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
                         {
-                            students.Add(new Student { StudentId = reader.GetInt32(0), FullName = reader.GetString(1) });
+                            students.Add(new Student
+                            {
+                                StudentId = reader.GetInt32(0),
+                                FullName = reader.GetString(1)
+                            });
                         }
                     }
 
@@ -381,10 +419,15 @@ namespace StudentManagementSystem
                     {
                         Console.Write($"Is {s.FullName} Present? (Y/n): ");
                         string input = Console.ReadLine();
-                        // Default to Present if user just hits Enter
                         string status = (input.Trim().ToLower() == "n") ? "Absent" : "Present";
 
-                        string insertAtt = "INSERT INTO Attendance (StudentId, Subject, ClassDate, Status) VALUES (@sid, @sub, @date, @stat)";
+                        // FIX: Use 'ON CONFLICT' to handle duplicates safely
+                        string insertAtt = @"
+                    INSERT INTO Attendance (StudentId, Subject, ClassDate, Status) 
+                    VALUES (@sid, @sub, @date, @stat)
+                    ON CONFLICT (StudentId, Subject, ClassDate) 
+                    DO UPDATE SET Status = @stat";
+
                         using (var cmd = new NpgsqlCommand(insertAtt, conn))
                         {
                             cmd.Parameters.AddWithValue("sid", s.StudentId);
@@ -547,12 +590,12 @@ namespace StudentManagementSystem
                 {
                     conn.Open();
 
-                    // 1. Get Current Info (Join Students and Users table)
+                    // 👇 FIX: Changed 'ClassName' to 'class'
                     string sql = @"
-                SELECT s.StudentId, s.FullName, s.ClassName, u.Email 
-                FROM Students s 
-                JOIN Users u ON s.StudentId = u.StudentId 
-                WHERE s.StudentCode = @c";
+        SELECT s.StudentId, s.FullName, s.class, u.Email 
+        FROM Students s 
+        JOIN Users u ON s.StudentId = u.StudentId 
+        WHERE s.StudentCode = @c";
 
                     int studentId = 0;
                     string currentName = "", currentClass = "", currentEmail = "";
@@ -566,7 +609,8 @@ namespace StudentManagementSystem
                             {
                                 studentId = reader.GetInt32(0);
                                 currentName = reader.GetString(1);
-                                currentClass = reader.GetString(2);
+                                // Handle potential nulls for class
+                                currentClass = reader.IsDBNull(2) ? "" : reader.GetString(2);
                                 currentEmail = reader.GetString(3);
                             }
                             else
@@ -578,7 +622,7 @@ namespace StudentManagementSystem
                         }
                     }
 
-                    // 2. Ask for New Info (Leave blank to keep old)
+                    // 2. Ask for New Info
                     Console.WriteLine($"\nEditing Student: {currentName}");
                     Console.WriteLine("(Press Enter to keep current value)");
 
@@ -598,8 +642,9 @@ namespace StudentManagementSystem
                     string newPass = Console.ReadLine();
 
                     // 3. Execute Updates
-                    // Update Student Table
-                    string updateStudent = "UPDATE Students SET FullName=@n, ClassName=@cl WHERE StudentId=@id";
+
+                    // 👇 FIX: Changed 'ClassName' to 'class'
+                    string updateStudent = "UPDATE Students SET FullName=@n, class=@cl WHERE StudentId=@id";
                     using (var cmd = new NpgsqlCommand(updateStudent, conn))
                     {
                         cmd.Parameters.AddWithValue("n", newName);
@@ -610,7 +655,6 @@ namespace StudentManagementSystem
 
                     // Update Users Table (Email)
                     string updateUser = "UPDATE Users SET Email=@e WHERE StudentId=@id";
-                    // If password was changed, update it too
                     if (!string.IsNullOrWhiteSpace(newPass))
                     {
                         updateUser = "UPDATE Users SET Email=@e, Password=@p WHERE StudentId=@id";
@@ -649,7 +693,6 @@ namespace StudentManagementSystem
             if (confirm.ToLower() != "yes")
             {
                 Console.WriteLine("Deletion Cancelled.");
-                Console.ReadKey();
                 return;
             }
 
@@ -659,25 +702,45 @@ namespace StudentManagementSystem
                 {
                     conn.Open();
 
-                    // Because we used "ON DELETE CASCADE" in the database creation script,
-                    // we only need to delete from the parent 'Students' table.
-                    // PostgreSQL will automatically delete the linked User, Scores, and Attendance rows.
+                    // 1. Get Student ID first (to ensure they exist)
+                    string findSql = "SELECT StudentId FROM Students WHERE StudentCode = @c";
+                    int studentId = 0;
 
-                    string sql = "DELETE FROM Students WHERE StudentCode = @c";
-
-                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    using (var cmd = new NpgsqlCommand(findSql, conn))
                     {
                         cmd.Parameters.AddWithValue("c", code);
-                        int rowsAffected = cmd.ExecuteNonQuery();
+                        object result = cmd.ExecuteScalar();
 
-                        if (rowsAffected > 0)
+                        if (result != null)
                         {
-                            Console.WriteLine("Student deleted successfully.");
+                            studentId = (int)result;
                         }
                         else
                         {
                             Console.WriteLine("Student not found.");
+                            Console.ReadKey();
+                            return;
                         }
+                    }
+
+                    // 2. ONE-SHOT DELETE
+                    // Instead of opening a transaction transaction object, we send all 4 commands
+                    // in a single string. This prevents the "Object Disposed" crash.
+                    string masterDeleteSql = @"
+                DELETE FROM Attendance WHERE StudentId = @id;
+                DELETE FROM Scores WHERE StudentId = @id;
+                DELETE FROM Users WHERE StudentId = @id;
+                DELETE FROM Students WHERE StudentId = @id;
+            ";
+
+                    using (var cmd = new NpgsqlCommand(masterDeleteSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("id", studentId);
+
+                        // This executes all 4 lines above in order.
+                        cmd.ExecuteNonQuery();
+
+                        Console.WriteLine("Success! Student and all related data have been deleted.");
                     }
                 }
             }
@@ -695,7 +758,6 @@ namespace StudentManagementSystem
         {
             Console.Clear();
 
-            // Safety check: ensure user is logged in
             if (currentUser == null || currentUser.StudentId == null)
             {
                 Console.WriteLine("Error: User not found.");
@@ -709,13 +771,13 @@ namespace StudentManagementSystem
                 {
                     conn.Open();
 
-                    // 1. Get the current student's scores
+                    // SQL: Use LEFT JOIN so we get the Student Name even if Scores are missing
                     string sql = @"
                 SELECT s.FullName, 
                        sc.Python, sc.OOP_OOM, sc.WritingII, 
                        sc.DatabaseSystem, sc.Microprocessor, sc.Network, sc.CoreEnglish 
                 FROM Students s 
-                JOIN Scores sc ON s.StudentId = sc.StudentId 
+                LEFT JOIN Scores sc ON s.StudentId = sc.StudentId 
                 WHERE s.StudentId = @id";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
@@ -727,48 +789,57 @@ namespace StudentManagementSystem
                             if (reader.Read())
                             {
                                 string name = reader.GetString(0);
-                                Console.WriteLine($"=== ACADEMIC RESULT FOR: {name} ===");
 
-                                // 2. Read Scores
-                                float total = 0;
-                                float[] scores = new float[7];
+                                // 1. PREPARE DATA
                                 string[] subjects = { "Python", "OOP_OOM", "Writing II", "DB System", "Microprocessor", "Network", "English" };
+                                float[] scores = new float[7];
+                                float total = 0;
+                                bool hasAnyScore = false; // Flag to check if there is real data
 
-                                // Loop through columns 1-7 (The subjects)
+                                // 2. READ AND SUM DATA FIRST (Don't print yet)
                                 for (int i = 0; i < 7; i++)
                                 {
-                                    // If database value is not null, read it.
+                                    // Column 0 is Name, so scores start at Column 1 (i + 1)
                                     if (!reader.IsDBNull(i + 1))
                                     {
-                                        scores[i] = (float)reader.GetDecimal(i + 1);
-                                        total += scores[i];
+                                        float val = Convert.ToSingle(reader.GetValue(i + 1));
+                                        scores[i] = val;
+                                        total += val;
+
+                                        // If we find a score greater than 0, we know results are out
+                                        if (val > 0) hasAnyScore = true;
                                     }
                                 }
 
-                                // ======================================================
-                                // 3. THE FIX: CHECK IF SCORES ARE ENTERED (Start vs End of Semester)
-                                // ======================================================
-                                if (total == 0)
+                                // 3. DECISION: SHOW MESSAGE OR SHOW TABLE
+                                if (!hasAnyScore)
                                 {
-                                    Console.WriteLine("\n------------------------------------------------");
-                                    Console.WriteLine(" 📢  STATUS: RESULTS COMING SOON");
-                                    Console.WriteLine("------------------------------------------------");
-                                    Console.WriteLine(" Your teachers have not uploaded the final scores yet.");
-                                    Console.WriteLine(" Please check back at the end of the semester.");
-                                    Console.WriteLine("------------------------------------------------");
+                                    // === SCENARIO A: RESULTS NOT OUT (Total is 0) ===
+                                    Console.WriteLine($"=== ACADEMIC RESULT FOR: {name} ===");
+                                    Console.WriteLine("\n\n");
+                                    Console.WriteLine("==========================================");
+                                    Console.WriteLine("|                                        |");
+                                    Console.WriteLine("|        📢 RESULTS COMING SOON         |");
+                                    Console.WriteLine("|                                        |");
+                                    Console.WriteLine("==========================================");
+                                    Console.WriteLine("\nYour instructors have not finalized the scores.");
+                                    Console.WriteLine("Please check back later.");
+                                    Console.WriteLine("\n\n");
                                 }
                                 else
                                 {
-                                    // 4. Scores exist -> Show the Report Card
+                                    // === SCENARIO B: RESULTS ARE OUT (Show the Table) ===
+                                    Console.WriteLine($"=== ACADEMIC RESULT FOR: {name} ===");
                                     Console.WriteLine(new string('-', 35));
+
                                     for (int i = 0; i < 7; i++)
                                     {
                                         Console.WriteLine($"{subjects[i],-18}: {scores[i]}");
                                     }
 
                                     float avg = total / 7;
-                                    string grade = CalculateGrade(avg);
-                                    string status = avg >= 60 ? "PASS" : "FAIL";
+                                    string grade = CalculateGrade(avg); // Make sure you have this helper function
+                                    string status = avg >= 50 ? "PASS" : "FAIL";
 
                                     Console.WriteLine(new string('-', 35));
                                     Console.WriteLine($"Total Score       : {total}");
@@ -779,7 +850,7 @@ namespace StudentManagementSystem
                             }
                             else
                             {
-                                Console.WriteLine("No student record found for this user.");
+                                Console.WriteLine("No student record found.");
                             }
                         }
                     }
@@ -795,29 +866,51 @@ namespace StudentManagementSystem
         }
         static void ViewMyAttendance()
         {
-            Console.WriteLine("\n-- My Attendance Summary --");
+            Console.Clear();
+            Console.WriteLine("=== MY ATTENDANCE SUMMARY ===");
+
             try
             {
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
                     string sql = "SELECT Subject, ClassDate, Status FROM Attendance WHERE StudentId = @sid ORDER BY ClassDate DESC";
+
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
                         cmd.Parameters.AddWithValue("sid", currentUser.StudentId);
+
                         using (var reader = cmd.ExecuteReader())
                         {
-                            Console.WriteLine(String.Format("{0,-20} | {1,-15} | {2}", "Subject", "Date", "Status"));
-                            while (reader.Read())
+                            if (reader.HasRows)
                             {
-                                Console.WriteLine(String.Format("{0,-20} | {1,-15:d} | {2}",
-                                    reader.GetString(0), reader.GetDateTime(1), reader.GetString(2)));
+                                Console.WriteLine("\n{0,-20} | {1,-15} | {2}", "Subject", "Date", "Status");
+                                Console.WriteLine(new string('-', 50));
+
+                                while (reader.Read())
+                                {
+                                    string subject = reader.GetString(0);
+                                    // :d formats datetime to Short Date (e.g., 12/25/2025)
+                                    string date = reader.GetDateTime(1).ToString("d");
+                                    string status = reader.GetString(2);
+
+                                    Console.WriteLine("{0,-20} | {1,-15} | {2}", subject, date, status);
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("\nNo attendance records found for your account.");
                             }
                         }
                     }
                 }
             }
-            catch (Exception ex) { Console.WriteLine(ex.Message); }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error loading attendance: " + ex.Message);
+            }
+
+            Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
 
@@ -903,20 +996,6 @@ namespace StudentManagementSystem
             }
             Console.WriteLine("Student not found.");
             return 0;
-        }
-
-        static string GetCodeByStudentId(int id)
-        {
-            using (var conn = DbHelper.GetConnection())
-            {
-                conn.Open();
-                string sql = "SELECT StudentCode FROM Students WHERE StudentId = @id";
-                using (var cmd = new NpgsqlCommand(sql, conn))
-                {
-                    cmd.Parameters.AddWithValue("id", id);
-                    return cmd.ExecuteScalar().ToString();
-                }
-            }
         }
     }
 }
