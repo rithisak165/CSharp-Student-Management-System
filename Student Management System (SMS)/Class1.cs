@@ -35,11 +35,15 @@ namespace StudentManagementSystem
         static void ShowLoginMenu()
         {
             Console.Clear();
-            Console.WriteLine("=== STUDENT MANAGEMENT SYSTEM LOGIN ===");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("=====================================================");
+            Console.WriteLine("=          STUDENT MANAGEMENT SYSTEM LOGIN          =");
+            Console.WriteLine("=====================================================");
+            Console.ResetColor();
             Console.Write("Email: ");
-            string email = Console.ReadLine();
+            string email = Console.ReadLine()!;
             Console.Write("Password: ");
-            string password = Console.ReadLine();
+            string password = Console.ReadLine()!;
             try
             {
                 using (var conn = DbHelper.GetConnection())
@@ -62,7 +66,10 @@ namespace StudentManagementSystem
                                     Role = reader.GetString(1),
                                     StudentId = reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2)
                                 };
+                                Console.ForegroundColor = ConsoleColor.Green;
                                 Console.WriteLine($"Login Successful! Welcome {currentUser.Role}.");
+                                Task.Delay(2000).Wait();
+                                Console.ResetColor();
                             }
                             else
                             {
@@ -87,17 +94,22 @@ namespace StudentManagementSystem
             TeacherSide teacher = new TeacherSide();
 
             Console.Clear();
-            Console.WriteLine("=== TEACHER DASHBOARD ===");
-            Console.WriteLine("1. Add New Student");
-            Console.WriteLine("2. View All Student Profiles (Info)");
-            Console.WriteLine("3. Enter/Update Scores");
-            Console.WriteLine("4. Record Attendance");
-            Console.WriteLine("5. View Attendance Report");
-            Console.WriteLine("6. View Student Academic Report");
-            Console.WriteLine("7. Update Student Info (Name, Email, Pass)");
-            Console.WriteLine("8. Delete Student");
-            Console.WriteLine("9. Logout");
-            Console.Write("Select: ");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("=====================================================");
+            Console.WriteLine("=             WELLCOME TEACHER DASHBOARD            =");
+            Console.WriteLine("=====================================================");
+            Console.ResetColor();
+
+            Console.ForegroundColor = ConsoleColor.Cyan; Console.WriteLine("1. Add New Student"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Green; Console.WriteLine("2. View All Student Profiles (Info)"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine("3. Enter/Update Scores"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Magenta; Console.WriteLine("4. Record Attendance"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.DarkCyan; Console.WriteLine("5. View Attendance Report"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.DarkYellow; Console.WriteLine("6. View Student Academic Report"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.DarkMagenta; Console.WriteLine("7. Update Student Info (Name, Email, Pass)"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine("8. Delete Student"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.Gray; Console.WriteLine("9. Logout"); Console.ResetColor();
+            Console.ForegroundColor = ConsoleColor.White; Console.Write("Select: "); Console.ResetColor();
 
             switch (Console.ReadLine())
             {
@@ -106,10 +118,10 @@ namespace StudentManagementSystem
                 case "2": teacher.ViewAllStudentProfiles(); break;
                 case "3": teacher.ManageScores(); break;
                 case "4": teacher.RecordAttendance(); break;
-                case "5": teacher.ViewAttendanceReport(); break; 
+                case "5": teacher.ViewAttendanceReport(); break;
                 case "6": teacher.ViewAcademicReport(); break;
-                case "7": teacher.UpdateStudentInfo(); break;    
-                case "8": teacher.DeleteStudent(); break;        
+                case "7": teacher.UpdateStudentInfo(); break;
+                case "8": teacher.DeleteStudent(); break;
 
                 case "9": currentUser = null; break;
                 default: Console.WriteLine("Invalid option."); break;
@@ -126,7 +138,7 @@ namespace StudentManagementSystem
             Console.WriteLine("=== STUDENT DASHBOARD ===");
             Console.WriteLine("1. View My Scores & Grades");
             Console.WriteLine("2. View My Attendance");
-             Console.WriteLine("3. View Academic Report");
+            Console.WriteLine("3. View Academic Report");
             Console.WriteLine("4. Logout");
             Console.Write("Select: ");
 
