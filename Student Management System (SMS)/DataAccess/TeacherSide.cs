@@ -86,7 +86,7 @@ namespace Student_Management_System__SMS_.DataAccess
                 Console.Write("Group (MS1/MS2): ");
                 string input = Console.ReadLine()?.Trim().ToUpper(); // Auto-convert to UPPERCASE
 
-                if (input == "0") return; // Allow Cancel
+                if (input == "0") return;
 
                 if (input == "MS1" || input == "MS2")
                 {
