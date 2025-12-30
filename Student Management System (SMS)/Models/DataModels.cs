@@ -13,6 +13,7 @@ namespace Student_Management_System__SMS_.Models
         public string Email { get; set; }
         public string Role { get; set; } // "Teacher" or "Student"
         public int? StudentId { get; set; } // Nullable (Teachers don't have this)
+        public string Subject { get; set; }
     }
 
     // Defines student info

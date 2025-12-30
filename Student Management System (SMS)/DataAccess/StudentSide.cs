@@ -7,14 +7,20 @@ namespace Student_Management_System__SMS_.DataAccess
 {
     public class StudentSide
     {
-        // We store the logged-in user here so all functions can use it
         private User _currentUser;
 
-        // CONSTRUCTOR: We force the main program to send us the user
+        // UI Colors
+        private static readonly ConsoleColor HeaderColor = ConsoleColor.Cyan;
+        private static readonly ConsoleColor SuccessColor = ConsoleColor.Green;
+        private static readonly ConsoleColor ErrorColor = ConsoleColor.Red;
+        private static readonly ConsoleColor WarningColor = ConsoleColor.Yellow;
+
         public StudentSide(User user)
         {
             _currentUser = user;
         }
+
+       
 
         // ==========================================
         // 1. VIEW MY SCORES
@@ -22,21 +28,15 @@ namespace Student_Management_System__SMS_.DataAccess
         public void ViewMyScores()
         {
             Console.Clear();
+            PrintHeader("MY ACADEMIC RESULT");
 
-            if (_currentUser == null || _currentUser.StudentId == null)
-            {
-                Console.WriteLine("Error: User not found.");
-                Console.ReadKey();
-                return;
-            }
+            if (_currentUser == null || _currentUser.StudentId == null) return;
 
             try
             {
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
-
-                    // SQL: Use LEFT JOIN so we get the Student Name even if Scores are missing
                     string sql = @"
                         SELECT s.FullName, 
                                sc.Python, sc.OOP_OOM, sc.WritingII, 
@@ -54,19 +54,17 @@ namespace Student_Management_System__SMS_.DataAccess
                             if (reader.Read())
                             {
                                 string name = reader.GetString(0);
-
-                                // 1. PREPARE DATA
                                 string[] subjects = { "Python", "OOP_OOM", "Writing II", "DB System", "Microprocessor", "Network", "English" };
                                 float[] scores = new float[7];
                                 float total = 0;
                                 bool hasAnyScore = false;
 
-                                // 2. READ AND SUM DATA
+                                // Read scores
                                 for (int i = 0; i < 7; i++)
                                 {
-                                    // Column 0 is Name, so scores start at Column 1
                                     if (!reader.IsDBNull(i + 1))
                                     {
+                                        // Use Convert.ToSingle to be safe against double/decimal types in DB
                                         float val = Convert.ToSingle(reader.GetValue(i + 1));
                                         scores[i] = val;
                                         total += val;
@@ -74,48 +72,43 @@ namespace Student_Management_System__SMS_.DataAccess
                                     }
                                 }
 
-                                // 3. SHOW RESULT
                                 if (!hasAnyScore)
                                 {
-                                    Console.WriteLine($"=== ACADEMIC RESULT FOR: {name} ===");
-                                    Console.WriteLine("\n==========================================");
-                                    Console.WriteLine("|        📢 RESULTS COMING SOON         |");
-                                    Console.WriteLine("==========================================");
-                                    Console.WriteLine("\nYour instructors have not finalized the scores.");
+                                    Console.WriteLine($"Student: {name}");
+                                    Console.WriteLine(new string('-', 40));
+                                    Console.WriteLine("  Scores have not been finalized yet.");
+                                    Console.WriteLine(new string('-', 40));
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"=== ACADEMIC RESULT FOR: {name} ===");
-                                    Console.WriteLine(new string('-', 35));
+                                    Console.WriteLine($"Student: {name}\n");
+                                    Console.WriteLine("{0,-20} {1}", "SUBJECT", "SCORE");
+                                    Console.WriteLine(new string('-', 30));
 
                                     for (int i = 0; i < 7; i++)
                                     {
-                                        Console.WriteLine($"{subjects[i],-18}: {scores[i]}");
+                                        Console.WriteLine($"{subjects[i],-20} {scores[i]}");
                                     }
 
                                     float avg = total / 7;
                                     string grade = CalculateGrade(avg);
-                                    string status = avg >= 50 ? "PASS" : "FAIL";
+                                    string status = avg >= 60 ? "PASS" : "FAIL";
 
-                                    Console.WriteLine(new string('-', 35));
-                                    Console.WriteLine($"Total Score       : {total}");
-                                    Console.WriteLine($"Average           : {avg:F2}");
-                                    Console.WriteLine($"Grade             : {grade}");
-                                    Console.WriteLine($"Final Status      : {status}");
+                                    Console.WriteLine(new string('-', 30));
+                                    Console.WriteLine($"Total:   {total}");
+                                    Console.WriteLine($"Average: {avg:F1}");
+
+                                    Console.Write("Grade:   ");
+                                    Console.ForegroundColor = avg >= 60 ? SuccessColor : ErrorColor;
+                                    Console.WriteLine($"{grade} ({status})");
+                                    Console.ResetColor();
                                 }
-                            }
-                            else
-                            {
-                                Console.WriteLine("No student record found.");
                             }
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error: " + ex.Message);
-            }
+            catch (Exception ex) { PrintError(ex.Message); }
 
             Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
@@ -127,82 +120,82 @@ namespace Student_Management_System__SMS_.DataAccess
         public void ViewMyAttendance()
         {
             Console.Clear();
-            Console.WriteLine("=== MY ATTENDANCE SUMMARY ===");
+            PrintHeader("MY ATTENDANCE SUMMARY");
 
-            if (_currentUser == null || _currentUser.StudentId == null)
-            {
-                Console.WriteLine("Error: User data missing.");
-                return;
-            }
+            if (_currentUser == null || _currentUser.StudentId == null) return;
 
             try
             {
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
-                    string sql = "SELECT Subject, ClassDate, Status FROM Attendance WHERE StudentId = @sid ORDER BY ClassDate DESC";
 
+                    // 1. Get Pending Requests Warning
+                    string pendingSql = "SELECT COUNT(*) FROM Excuses WHERE StudentId = @sid AND Status = 'Pending'";
+                    using (var cmd = new NpgsqlCommand(pendingSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
+                        long pending = (long)cmd.ExecuteScalar();
+                        if (pending > 0)
+                        {
+                            Console.ForegroundColor = WarningColor;
+                            Console.WriteLine($"* You have {pending} pending excuse request(s).\n");
+                            Console.ResetColor();
+                        }
+                    }
+
+                    // 2. Get Records
+                    string sql = "SELECT Subject, ClassDate, Status FROM Attendance WHERE StudentId = @sid ORDER BY ClassDate DESC";
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
                         cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
-
                         using (var reader = cmd.ExecuteReader())
                         {
                             if (reader.HasRows)
                             {
-                                Console.WriteLine("\n{0,-20} | {1,-15} | {2}", "Subject", "Date", "Status");
-                                Console.WriteLine(new string('-', 50));
+                                Console.WriteLine("{0,-15} | {1,-12} | {2}", "Subject", "Date", "Status");
+                                Console.WriteLine(new string('-', 45));
 
                                 while (reader.Read())
                                 {
                                     string subject = reader.GetString(0);
-                                    string date = reader.GetDateTime(1).ToString("d");
+                                    string date = reader.GetDateTime(1).ToString("yyyy-MM-dd");
                                     string status = reader.GetString(2);
 
-                                    Console.WriteLine("{0,-20} | {1,-15} | {2}", subject, date, status);
+                                    Console.Write("{0,-15} | {1,-12} | ", subject, date);
+
+                                    if (status == "Present") Console.ForegroundColor = SuccessColor;
+                                    else Console.ForegroundColor = ErrorColor;
+
+                                    Console.WriteLine(status);
+                                    Console.ResetColor();
                                 }
                             }
                             else
                             {
-                                Console.WriteLine("\nNo attendance records found for your account.");
+                                Console.WriteLine("No attendance records found.");
                             }
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error loading attendance: " + ex.Message);
-            }
+            catch (Exception ex) { PrintError(ex.Message); }
 
             Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
-
         // ==========================================
-        // 3. HELPER (For Grades)
+        // 3. VIEW ACADEMIC REPORT (FOR ALL STUDENTS)
         // ==========================================
-        // 
-        private string CalculateGrade(float score)
-        {
-            if (score >= 85) return "A";
-            if (score >= 75) return "B";
-            if (score >= 65) return "C";
-            if (score >= 50) return "D";
-            return "F";
-        }
-        // ===========================================
-        // 4. VIEW FULL ACADEMIC REPORT (FOR STUDENTS)
-        // ===========================================
         public void ViewAcademicReport()
         {
-            Console.Clear();
-            Console.WriteLine("=== FULL STUDENT REPORT ===");
+            PrintHeader("ACADEMIC PERFORMANCE REPORT");
 
-            // Adjusted columns to fit "Coming Soon" text
-            Console.WriteLine(String.Format("{0,-8} | {1,-18} | {2,-6} | {3,-6} | {4,-5} | {5,-4} | {6,-4} | {7}",
-                "Code", "Name", "Total", "Avg", "Grd", "Pres", "Abs", "Status"));
-            Console.WriteLine(new string('-', 85));
+            Console.ForegroundColor = HeaderColor;
+            Console.WriteLine("{0,-10} {1,-20} {2,-8} {3,-6} {4,-6} {5,-8} {6,-8} {7,-10}",
+                "Code", "Name", "Total", "Avg", "Grade", "Present", "Absent", "Status");
+            Console.WriteLine(new string('─', 85));
+            Console.ResetColor();
 
             try
             {
@@ -211,70 +204,240 @@ namespace Student_Management_System__SMS_.DataAccess
                     conn.Open();
 
                     string sql = @"
-                SELECT s.StudentCode, s.FullName, 
-                       sc.Python, sc.OOP_OOM, sc.WritingII, sc.DatabaseSystem, 
-                       sc.Microprocessor, sc.Network, sc.CoreEnglish,
-                       (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Present') as PresentCount,
-                       (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Absent') as AbsentCount
-                FROM Students s 
-                JOIN Scores sc ON s.StudentId = sc.StudentId
-                ORDER BY s.StudentCode ASC";
+                    SELECT s.StudentCode, s.FullName, 
+                           sc.Python, sc.OOP_OOM, sc.WritingII, sc.DatabaseSystem, 
+                           sc.Microprocessor, sc.Network, sc.CoreEnglish,
+                           (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Present') as PresentCount,
+                           (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Absent') as AbsentCount
+                    FROM Students s 
+                    JOIN Scores sc ON s.StudentId = sc.StudentId
+                    ORDER BY s.StudentCode ASC";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     using (var reader = cmd.ExecuteReader())
                     {
-                        if (!reader.HasRows) Console.WriteLine("No records found.");
+                        if (!reader.HasRows)
+                        {
+                            Console.WriteLine("No records found.");
+                            Console.ReadKey();
+                            return;
+                        }
 
                         while (reader.Read())
                         {
                             string code = reader.GetString(0);
                             string name = reader.GetString(1);
-                            if (name.Length > 18) name = name.Substring(0, 15) + "...";
+                            if (name.Length > 18) name = name.Substring(0, 17) + "...";
 
-                            // Calculate Total Score
                             float total = 0;
+                            // Loop through columns 2 to 8 (The 7 subjects)
                             for (int i = 2; i <= 8; i++)
                             {
-                                if (!reader.IsDBNull(i)) total += (float)reader.GetDecimal(i);
+                                // Changed to Convert.ToSingle for safety
+                                if (!reader.IsDBNull(i)) total += Convert.ToSingle(reader.GetValue(i));
                             }
 
-                            // Attendance Counts
                             long present = reader.GetInt64(9);
                             long absent = reader.GetInt64(10);
 
-                            // --- NEW LOGIC: Check if scores exist ---
                             string avgDisplay, gradeDisplay, statusDisplay;
+                            ConsoleColor statusColor;
 
                             if (total == 0)
                             {
-                                // Teacher hasn't entered scores yet
                                 avgDisplay = "-";
                                 gradeDisplay = "-";
-                                statusDisplay = "Coming Soon";
+                                statusDisplay = "Pending";
+                                statusColor = WarningColor;
                             }
                             else
                             {
-                                // Scores exist
                                 float avg = total / 7;
                                 avgDisplay = avg.ToString("F1");
                                 gradeDisplay = CalculateGrade(avg);
                                 statusDisplay = avg >= 60 ? "PASS" : "FAIL";
+                                statusColor = avg >= 60 ? SuccessColor : ErrorColor;
                             }
 
-                            // Print Row
-                            Console.WriteLine(String.Format("{0,-8} | {1,-18} | {2,-6} | {3,-6} | {4,-5} | {5,-4} | {6,-4} | {7}",
-                                code, name, total, avgDisplay, gradeDisplay, present, absent, statusDisplay));
+                            Console.Write("{0,-10} {1,-20} {2,-8} {3,-6} {4,-6} {5,-8} {6,-8} ",
+                                code, name, total, avgDisplay, gradeDisplay, present, absent);
+
+                            Console.ForegroundColor = statusColor;
+                            Console.WriteLine(statusDisplay);
+                            Console.ResetColor();
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error: " + ex.Message);
-            }
+            catch (Exception ex) { PrintError(ex.Message); }
 
             Console.WriteLine("\nPress any key to go back...");
             Console.ReadKey();
+        }
+        // ==========================================
+        // 4. REQUEST PERMISSION (The Missing Feature)
+        // ==========================================
+        public void RequestPermission()
+        {
+            Console.Clear();
+            PrintHeader("REQUEST PERMISSION / EXCUSE");
+            Console.WriteLine("(Type '0' to Cancel)\n");
+
+            if (_currentUser == null || _currentUser.StudentId == null)
+            {
+                PrintError("User error. Cannot identify student ID.");
+                Console.ReadKey();
+                return;
+            }
+
+            // 1. Get Date
+            DateTime date = DateTime.Today;
+            Console.Write($"Enter Date (YYYY-MM-DD) [Default: {date:yyyy-MM-dd}]: ");
+            string dateInput = Console.ReadLine()?.Trim();
+
+            if (dateInput == "0") return;
+            if (!string.IsNullOrEmpty(dateInput))
+            {
+                if (!DateTime.TryParse(dateInput, out date))
+                {
+                    PrintWarning("Invalid date format. Using today's date instead.");
+                    date = DateTime.Today;
+                }
+            }
+
+            // 2. Get Reason
+            string reason = "";
+            while (string.IsNullOrWhiteSpace(reason))
+            {
+                Console.Write("Enter Reason for absence: ");
+                reason = Console.ReadLine()?.Trim();
+                if (reason == "0") return;
+                if (string.IsNullOrWhiteSpace(reason)) PrintWarning("Reason cannot be empty.");
+            }
+
+            // 3. Insert into Database
+            try
+            {
+                using (var conn = DbHelper.GetConnection())
+                {
+                    conn.Open();
+
+                    // Check if request already exists for this day
+                    string checkSql = "SELECT COUNT(*) FROM Excuses WHERE StudentId = @sid AND ClassDate = @date";
+                    using (var cmd = new NpgsqlCommand(checkSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
+                        cmd.Parameters.AddWithValue("date", date);
+                        long count = (long)cmd.ExecuteScalar();
+
+                        if (count > 0)
+                        {
+                            PrintError("You have already submitted a request for this date.");
+                            Console.ReadKey();
+                            return;
+                        }
+                    }
+
+                    // Insert the excuse
+                    string sql = @"INSERT INTO Excuses (StudentId, ClassDate, Reason, Status) 
+                                   VALUES (@sid, @date, @r, 'Pending')";
+
+                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
+                        cmd.Parameters.AddWithValue("date", date);
+                        cmd.Parameters.AddWithValue("r", reason);
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    PrintSuccess("Request submitted successfully!");
+                    Console.WriteLine("Your teacher will review it. Check status later.");
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError(ex.Message);
+            }
+
+            Console.WriteLine("\nPress any key to return...");
+            Console.ReadKey();
+        }
+        // ==========================================
+        // 5. VIEW PROFILE (Replaces Academic Report)
+        // ==========================================
+        public void ViewProfile()
+        {
+            Console.Clear();
+            PrintHeader("MY PROFILE");
+
+            try
+            {
+                using (var conn = DbHelper.GetConnection())
+                {
+                    conn.Open();
+                    string sql = "SELECT StudentCode, FullName, class FROM Students WHERE StudentId = @sid";
+
+                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                Console.WriteLine($"Name:     {reader.GetString(1)}");
+                                Console.WriteLine($"Code:     {reader.GetString(0)}");
+                                Console.WriteLine($"Group:    {reader.GetString(2)}");
+                                Console.WriteLine($"Email:    {_currentUser.Email}");
+                                Console.WriteLine($"Role:     {_currentUser.Role}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { PrintError(ex.Message); }
+
+            Console.WriteLine("\nPress any key to go back...");
+            Console.ReadKey();
+        }
+
+        // ==========================================
+        // HELPERS
+        // ==========================================
+        private string CalculateGrade(float score)
+        {
+            if (score >= 90) return "A";
+            if (score >= 80) return "B";
+            if (score >= 70) return "C";
+            if (score >= 60) return "D";
+            return "F";
+        }
+
+        private void PrintHeader(string title)
+        {
+            Console.ForegroundColor = HeaderColor;
+            Console.WriteLine($"=== {title} ===");
+            Console.ResetColor();
+        }
+
+        private void PrintSuccess(string msg)
+        {
+            Console.ForegroundColor = SuccessColor;
+            Console.WriteLine($"✓ {msg}");
+            Console.ResetColor();
+        }
+
+        private void PrintError(string msg)
+        {
+            Console.ForegroundColor = ErrorColor;
+            Console.WriteLine($"✗ Error: {msg}");
+            Console.ResetColor();
+        }
+
+        private void PrintWarning(string msg)
+        {
+            Console.ForegroundColor = WarningColor;
+            Console.WriteLine($"! {msg}");
+            Console.ResetColor();
         }
     }
 }

@@ -14,6 +14,12 @@ namespace Student_Management_System__SMS_.DataAccess
         private static readonly ConsoleColor InfoColor = ConsoleColor.Magenta;
         private static readonly ConsoleColor TableHeaderColor = ConsoleColor.White;
         private static readonly ConsoleColor HighlightColor = ConsoleColor.DarkCyan;
+        private User currentUser;
+
+        public TeacherSide(User currentUser)
+        {
+            this.currentUser = currentUser;
+        }
 
         private static void PrintHeader(string title)
         {
@@ -62,14 +68,12 @@ namespace Student_Management_System__SMS_.DataAccess
         }
 
         // ==========================================
-        // 1. ADD STUDENT
+        // 1. ADD NEW STUDENT
         // ==========================================
         public void AddStudent()
         {
             Console.Clear();
-            Console.WriteLine("==========================================");
-            Console.WriteLine("           ADD NEW STUDENT");
-            Console.WriteLine("==========================================");
+            PrintHeader("ADD NEW STUDENT");
             Console.WriteLine("(Type '0' at any step to Cancel and Go Back)\n");
 
             // 1. Standard Inputs
@@ -84,20 +88,18 @@ namespace Student_Management_System__SMS_.DataAccess
             while (true)
             {
                 Console.Write("Group (MS1/MS2): ");
-                string input = Console.ReadLine()?.Trim().ToUpper(); // Auto-convert to UPPERCASE
+                string input = Console.ReadLine()?.Trim().ToUpper();
 
                 if (input == "0") return;
 
                 if (input == "MS1" || input == "MS2")
                 {
                     className = input;
-                    break; // Valid input, exit loop
+                    break;
                 }
                 else
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("Error: Group must be exactly 'MS1' or 'MS2'.");
-                    Console.ResetColor();
+                    PrintError("Group must be exactly 'MS1' or 'MS2'.");
                 }
             }
 
@@ -115,9 +117,12 @@ namespace Student_Management_System__SMS_.DataAccess
                 {
                     conn.Open();
 
-                    // Insert Student
-                    string insertStudent = "INSERT INTO Students (StudentCode, FullName, class) VALUES (@c, @n, @cl) RETURNING StudentId";
+                    // === FIX IS HERE === 
+                    // Changed "ClassName" to "Class" to match your database
+                    string insertStudent = "INSERT INTO Students (StudentCode, FullName, Class) VALUES (@c, @n, @cl) RETURNING StudentId";
+
                     int newStudentId;
+
                     using (var cmd = new NpgsqlCommand(insertStudent, conn))
                     {
                         cmd.Parameters.AddWithValue("c", code);
@@ -136,38 +141,97 @@ namespace Student_Management_System__SMS_.DataAccess
                         cmd.ExecuteNonQuery();
                     }
 
-                    // Init Scores
+                    // Init Scores (Set all to 0)
                     string initScore = @"INSERT INTO Scores 
-                (StudentId, Python, OOP_OOM, WritingII, DatabaseSystem, Microprocessor, Network, CoreEnglish) 
-                VALUES (@sid, 0, 0, 0, 0, 0, 0, 0)";
+                               (StudentId, Python, OOP_OOM, WritingII, DatabaseSystem, Microprocessor, Network, CoreEnglish) 
+                               VALUES (@sid, 0, 0, 0, 0, 0, 0, 0)";
                     using (var cmd = new NpgsqlCommand(initScore, conn))
                     {
                         cmd.Parameters.AddWithValue("sid", newStudentId);
                         cmd.ExecuteNonQuery();
                     }
 
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"\nStudent Added Successfully!");
-                    Console.ResetColor();
+                    PrintSuccess("Student Added Successfully!");
                     Console.WriteLine($"Login Credentials -> Email: {email} | Password: {pass}");
                 }
             }
             catch (Exception ex)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Error: " + ex.Message);
-                Console.ResetColor();
+                PrintError(ex.Message);
             }
 
             Console.WriteLine("\nPress any key to continue...");
             Console.ReadKey();
         }
+        // ==========================================
+        // 2. VIEW ALL PROFILES
+        // ==========================================
+        public void ViewAllStudentProfiles()
+        {
+            PrintHeader("ALL STUDENT PROFILES");
+
+            Console.ForegroundColor = TableHeaderColor;
+            Console.WriteLine("{0,-10} {1,-25} {2,-10} {3,-30} {4,-15}", "Code", "Full Name", "Group", "Email", "Password");
+            Console.WriteLine(new string('─', 95));
+            Console.ResetColor();
+
+            try
+            {
+                using (var conn = DbHelper.GetConnection())
+                {
+                    conn.Open();
+
+                    // FIXED: Changed 's.ClassName' to 's.Class'
+                    string sql = @"
+                SELECT s.StudentCode, s.FullName, s.Class, u.Email, u.Password 
+                FROM Students s 
+                JOIN Users u ON s.StudentId = u.StudentId 
+                ORDER BY s.StudentCode ASC";
+
+                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (!reader.HasRows)
+                        {
+                            PrintWarning("No students found.");
+                        }
+
+                        while (reader.Read())
+                        {
+                            string code = reader.GetString(0);
+                            string name = reader.GetString(1);
+
+                            // FIXED: Handle potential nulls safely
+                            string cls = reader.IsDBNull(2) ? "-" : reader.GetString(2);
+
+                            string email = reader.GetString(3);
+                            string password = reader.GetString(4);
+
+                            // Truncate long names for display
+                            if (name.Length > 23) name = name.Substring(0, 20) + "...";
+
+                            Console.WriteLine("{0,-10} {1,-25} {2,-10} {3,-30} {4,-15}", code, name, cls, email, password);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError(ex.Message);
+                // Debugging hint:
+                if (ex.Message.Contains("does not exist"))
+                {
+                    Console.WriteLine("\n[Hint]: Check your database columns in pgAdmin. Expected column 'Class' in table 'Students'.");
+                }
+            }
+
+            Console.WriteLine("\nPress any key to go back...");
+            Console.ReadKey();
+        }
 
         // ==========================================
-        // HELPER FUNCTION: Get Valid Input
+        // 3. HELPER FUNCTION
         // ==========================================
-        // This function forces the user to type something.
-        // If they type "0", it returns null (signal to cancel).
         private string GetValidInput(string prompt)
         {
             while (true)
@@ -186,83 +250,31 @@ namespace Student_Management_System__SMS_.DataAccess
                     return input;
                 }
 
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Error: Input cannot be empty! (Type '0' to Cancel)");
-                Console.ResetColor();
+                PrintError("Input cannot be empty! (Type '0' to Cancel)");
             }
         }
         // ==========================================
-        // 2. VIEW PROFILES
-        // ==========================================
-        public void ViewAllStudentProfiles()
-        {
-            PrintHeader("           ALL STUDENT PROFILES");
-
-            Console.ForegroundColor = TableHeaderColor;
-            Console.WriteLine(String.Format("{0,-10} {1,-25} {2,-10} {3,-30} {4,-15}",
-                "Code", "Full Name", "Group", "Email", "Password"));
-            Console.WriteLine(new string('─', 95));
-            Console.ResetColor();
-
-            try
-            {
-                using (var conn = DbHelper.GetConnection())
-                {
-                    conn.Open();
-                    string sql = @"
-                        SELECT s.StudentCode, s.FullName, s.class, u.Email, u.Password 
-                        FROM Students s 
-                        JOIN Users u ON s.StudentId = u.StudentId 
-                        ORDER BY s.StudentCode ASC";
-
-                    using (var cmd = new NpgsqlCommand(sql, conn))
-                    using (var reader = cmd.ExecuteReader())
-                    {
-                        if (!reader.HasRows)
-                        {
-                            Console.ForegroundColor = WarningColor;
-                            Console.WriteLine("No students found.");
-                            Console.ResetColor();
-                        }
-
-                        while (reader.Read())
-                        {
-                            string code = reader.GetString(0);
-                            string name = reader.GetString(1);
-                            string className = reader.IsDBNull(2) ? "-" : reader.GetString(2);
-                            string email = reader.GetString(3);
-                            string password = reader.GetString(4);
-
-                            if (name.Length > 23) name = name.Substring(0, 20) + "...";
-
-                            Console.WriteLine(String.Format("{0,-10} {1,-25} {2,-10} {3,-30} {4,-15}",
-                                code, name, className, email, password));
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                PrintError(ex.Message);
-            }
-
-            Console.WriteLine("\nPress any key to go back...");
-            Console.ReadKey();
-        }
-
-        // ========================
         // 3. MANAGE SCORES
-        // ========================
+        // ==========================================
         public void ManageScores()
         {
-            Console.Clear();
-            Console.WriteLine("=== MANAGE STUDENT SCORES ===");
-            Console.WriteLine("(Type '0' to Cancel Selection)\n");
+            // Debug check to prove code updated
+            Console.WriteLine("\n*** NEW CODE LOADED: ManageScores ***\n");
 
-            // 1. Get Student Code
-            // We reuse the helper we made earlier
-            string code = GetValidInput("Enter Student Code: ");
-            if (code == null) return; // User typed 0 to go back
+            if (currentUser == null || string.IsNullOrEmpty(currentUser.Subject))
+            {
+                Console.WriteLine("Error: You are not assigned a subject.");
+                Console.ReadKey();
+                return;
+            }
+
+            Console.Clear();
+            Console.WriteLine($"=== MANAGE SCORES: {currentUser.Subject} ===");
+            Console.WriteLine("(Type '0' to Cancel)\n");
+
+            Console.Write("Enter Student Code (e.g., B20244047): ");
+            string code = Console.ReadLine();
+            if (string.IsNullOrEmpty(code) || code == "0") return;
 
             try
             {
@@ -270,147 +282,95 @@ namespace Student_Management_System__SMS_.DataAccess
                 {
                     conn.Open();
 
-                    // 2. Find Student ID
-                    // We use a new helper function here
-                    int studentId = GetStudentIdByCode(conn, code);
+                    // 1. Get Student ID
+                    int studentId = 0;
+                    string findSql = "SELECT StudentId FROM Students WHERE StudentCode = @c";
+                    using (var cmd = new NpgsqlCommand(findSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("c", code);
+                        var res = cmd.ExecuteScalar();
+                        if (res != null) studentId = (int)res;
+                    }
 
                     if (studentId == 0)
                     {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"\nStudent with code '{code}' not found.");
-                        Console.ResetColor();
-                        Console.WriteLine("Press any key to return...");
+                        Console.WriteLine("Student not found.");
                         Console.ReadKey();
                         return;
                     }
 
-                    // 3. Enter Scores
-                    Console.WriteLine($"\nEditing Scores for: {code}");
-                    Console.WriteLine("Enter scores (0-100). Type 'exit' to cancel.\n");
+                    // 2. Input Score for YOUR SUBJECT ONLY
+                    Console.WriteLine($"\nEditing {currentUser.Subject} score for student: {code}");
 
-                    // We use 'GetValidScore' to handle numbers and validation
-                    float py = GetValidScore("Python");
-                    if (py == -1) return; // -1 means user typed 'exit'
+                    float score = -1;
+                    while (true)
+                    {
+                        Console.Write($"Enter {currentUser.Subject} Score (0-100): ");
+                        string input = Console.ReadLine();
 
-                    float oop = GetValidScore("OOP & OOM");
-                    if (oop == -1) return;
+                        if (input == "exit") return;
 
-                    float writ = GetValidScore("Writing II");
-                    if (writ == -1) return;
+                        if (float.TryParse(input, out score) && score >= 0 && score <= 100)
+                        {
+                            break;
+                        }
+                        Console.WriteLine("Invalid score.");
+                    }
 
-                    float db = GetValidScore("Database System");
-                    if (db == -1) return;
-
-                    float micro = GetValidScore("Microprocessor");
-                    if (micro == -1) return;
-
-                    float net = GetValidScore("Network");
-                    if (net == -1) return;
-
-                    float eng = GetValidScore("Core English");
-                    if (eng == -1) return;
-
-                    // 4. Update Database
-                    string sql = @"UPDATE Scores SET 
-                           Python=@py, OOP_OOM=@oop, WritingII=@writ, 
-                           DatabaseSystem=@db, Microprocessor=@micro, Network=@net, CoreEnglish=@eng 
-                           WHERE StudentId=@sid";
+                    // 3. Update Database (Dynamic Column Name)
+                    // Note: We use double quotes around the column name to handle case sensitivity if needed
+                    string sql = $"UPDATE Scores SET \"{currentUser.Subject.ToLower()}\" = @s WHERE StudentId = @sid";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
-                        cmd.Parameters.AddWithValue("py", py);
-                        cmd.Parameters.AddWithValue("oop", oop);
-                        cmd.Parameters.AddWithValue("writ", writ);
-                        cmd.Parameters.AddWithValue("db", db);
-                        cmd.Parameters.AddWithValue("micro", micro);
-                        cmd.Parameters.AddWithValue("net", net);
-                        cmd.Parameters.AddWithValue("eng", eng);
+                        cmd.Parameters.AddWithValue("s", score);
                         cmd.Parameters.AddWithValue("sid", studentId);
                         cmd.ExecuteNonQuery();
                     }
 
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("\nScores updated successfully!");
+                    Console.WriteLine($"\nSuccess! Updated {currentUser.Subject} score to {score}");
                     Console.ResetColor();
                 }
             }
             catch (Exception ex)
             {
+                Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("Error: " + ex.Message);
+                Console.ResetColor();
             }
-
-            Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
-        public float GetValidScore(string subjectName)
-        {
-            float score;
-            while (true)
-            {
-                Console.ForegroundColor = InfoColor;
-                Console.Write($"{subjectName}: ");
-                Console.ResetColor();
-                string input = Console.ReadLine();
-
-                if (float.TryParse(input, out score) && score >= 0 && score <= 100)
-                {
-                    return score;
-                }
-
-                PrintError($"{subjectName} score must be a number between 0 and 100.");
-            }
-        }
-
-        public int GetStudentIdByCode(NpgsqlConnection conn, string code)
-        {
-            string sql = "SELECT StudentId FROM Students WHERE StudentCode = @c";
-            using (var cmd = new NpgsqlCommand(sql, conn))
-            {
-                cmd.Parameters.AddWithValue("c", code);
-                var res = cmd.ExecuteScalar();
-                if (res != null) return (int)res;
-            }
-            PrintWarning("Student not found with that code.");
-            return 0;
-        }
-
         // ==========================================
         // 4. RECORD ATTENDANCE
         // ==========================================
         public void RecordAttendance()
         {
-            PrintHeader("            RECORD ATTENDANCE");
+            // Debug check
+            Console.WriteLine("\n*** NEW CODE LOADED: RecordAttendance ***\n");
 
-            string[] subjects = { "Python", "OOP_OOM", "WritingII", "DatabaseSystem", "Microprocessor", "Network", "CoreEnglish" };
-            Console.WriteLine("Select Subject:\n");
-            for (int i = 0; i < subjects.Length; i++)
+            if (currentUser == null || string.IsNullOrEmpty(currentUser.Subject))
             {
-                Console.WriteLine($"  {i + 1}. {subjects[i]}");
-            }
-
-            Console.Write("\nChoice (1-7): ");
-            if (!int.TryParse(Console.ReadLine(), out int choice) || choice < 1 || choice > 7)
-            {
-                PrintError("Invalid selection.");
+                Console.WriteLine("Error: No Subject assigned.");
                 Console.ReadKey();
                 return;
             }
 
-            string selectedSubject = subjects[choice - 1];
+            Console.Clear();
+            Console.WriteLine($"=== ATTENDANCE: {currentUser.Subject} ===");
             DateTime date = DateTime.Today;
-
-            Console.ForegroundColor = HighlightColor;
-            Console.WriteLine($"\nRecording attendance for: {selectedSubject}");
             Console.WriteLine($"Date: {date:yyyy-MM-dd}\n");
-            Console.ResetColor();
+            Console.WriteLine("Press 'Y' for Present, 'N' for Absent.\n");
 
             try
             {
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
+
+                    // 1. Get Students
                     var students = new List<Student>();
-                    string sql = "SELECT StudentId, FullName FROM Students ORDER BY StudentCode ASC";
+                    string sql = "SELECT StudentId, FullName, StudentCode FROM Students ORDER BY StudentCode ASC";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     using (var reader = cmd.ExecuteReader())
@@ -420,46 +380,60 @@ namespace Student_Management_System__SMS_.DataAccess
                             students.Add(new Student
                             {
                                 StudentId = reader.GetInt32(0),
-                                FullName = reader.GetString(1)
+                                FullName = reader.GetString(1),
+                                StudentCode = reader.GetString(2)
                             });
                         }
                     }
 
+                    // 2. Loop
+                    int presentCount = 0;
                     foreach (var s in students)
                     {
-                        Console.Write($"Is {s.FullName} Present? (Y/n): ");
-                        string input = Console.ReadLine().Trim().ToLower();
-                        string status = (input == "n") ? "Absent" : "Present";
+                        Console.Write($"{s.StudentCode} - {s.FullName}: ");
+                        string status = "Absent";
 
-                        Console.ForegroundColor = status == "Present" ? SuccessColor : WarningColor;
-                        Console.WriteLine($"   → {status}\n");
-                        Console.ResetColor();
+                        while (true)
+                        {
+                            var key = Console.ReadKey(intercept: true).Key;
+                            if (key == ConsoleKey.Y)
+                            {
+                                Console.Write(" Present\n");
+                                status = "Present";
+                                presentCount++;
+                                break;
+                            }
+                            if (key == ConsoleKey.N)
+                            {
+                                Console.Write(" Absent\n");
+                                status = "Absent";
+                                break;
+                            }
+                        }
 
-                        string insertAtt = @"
-                            INSERT INTO Attendance (StudentId, Subject, ClassDate, Status) 
-                            VALUES (@sid, @sub, @date, @stat)
-                            ON CONFLICT (StudentId, Subject, ClassDate) 
-                            DO UPDATE SET Status = @stat";
+                        // 3. Insert/Update Attendance
+                        // Matches your DB table structure exactly
+                        string insert = @"INSERT INTO Attendance (StudentId, Subject, ClassDate, Status) 
+                                          VALUES (@sid, @sub, @date, @stat)
+                                          ON CONFLICT (StudentId, Subject, ClassDate) 
+                                          DO UPDATE SET Status = @stat";
 
-                        using (var cmd = new NpgsqlCommand(insertAtt, conn))
+                        using (var cmd = new NpgsqlCommand(insert, conn))
                         {
                             cmd.Parameters.AddWithValue("sid", s.StudentId);
-                            cmd.Parameters.AddWithValue("sub", selectedSubject);
+                            cmd.Parameters.AddWithValue("sub", currentUser.Subject);
                             cmd.Parameters.AddWithValue("date", date);
                             cmd.Parameters.AddWithValue("stat", status);
                             cmd.ExecuteNonQuery();
                         }
                     }
-
-                    PrintSuccess("Attendance recorded successfully for all students!");
+                    Console.WriteLine($"\nDone! {presentCount} Present.");
                 }
             }
             catch (Exception ex)
             {
-                PrintError(ex.Message);
+                Console.WriteLine("Error: " + ex.Message);
             }
-
-            Console.WriteLine("\nPress any key to continue...");
             Console.ReadKey();
         }
 
@@ -468,11 +442,11 @@ namespace Student_Management_System__SMS_.DataAccess
         // ==========================================
         public void ViewAttendanceReport()
         {
-            PrintHeader("            ATTENDANCE REPORT");
+            PrintHeader("ATTENDANCE REPORT");
 
-            Console.ForegroundColor = TableHeaderColor;
-            Console.WriteLine(String.Format("{0,-25} {1,-10} {2,-10} {3,-10} {4,-8}",
-                "Student Name", "Total", "Present", "Absent", "Percent"));
+            Console.ForegroundColor = HeaderColor;
+            Console.WriteLine("{0,-25} {1,-10} {2,-10} {3,-10} {4,-8}",
+                "Student Name", "Total", "Present", "Absent", "Percent");
             Console.WriteLine(new string('─', 70));
             Console.ResetColor();
 
@@ -482,22 +456,19 @@ namespace Student_Management_System__SMS_.DataAccess
                 {
                     conn.Open();
                     string sql = @"
-                        SELECT s.FullName, 
-                               COUNT(a.AttendanceId) as Total,
-                               SUM(CASE WHEN a.Status = 'Present' THEN 1 ELSE 0 END) as PresentCount,
-                               SUM(CASE WHEN a.Status = 'Absent' THEN 1 ELSE 0 END) as AbsentCount
-                        FROM Students s
-                        LEFT JOIN Attendance a ON s.StudentId = a.StudentId
-                        GROUP BY s.StudentId, s.FullName
-                        ORDER BY s.FullName";
+                    SELECT s.FullName, 
+                           COUNT(a.AttendanceId) as Total,
+                           SUM(CASE WHEN a.Status = 'Present' THEN 1 ELSE 0 END) as PresentCount,
+                           SUM(CASE WHEN a.Status = 'Absent' THEN 1 ELSE 0 END) as AbsentCount
+                    FROM Students s
+                    LEFT JOIN Attendance a ON s.StudentId = a.StudentId
+                    GROUP BY s.StudentId, s.FullName
+                    ORDER BY s.FullName";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     using (var reader = cmd.ExecuteReader())
                     {
-                        if (!reader.HasRows)
-                        {
-                            Console.WriteLine("No attendance records yet.");
-                        }
+                        if (!reader.HasRows) Console.WriteLine("No attendance records yet.");
 
                         while (reader.Read())
                         {
@@ -507,24 +478,21 @@ namespace Student_Management_System__SMS_.DataAccess
                             long absent = reader.IsDBNull(3) ? 0 : reader.GetInt64(3);
                             double pct = total == 0 ? 0 : Math.Round((double)present / total * 100, 1);
 
-                            ConsoleColor pctColor = pct >= 90 ? SuccessColor : pct >= 70 ? ConsoleColor.Yellow : ErrorColor;
+                            ConsoleColor pctColor = pct >= 90 ? SuccessColor : pct >= 70 ? WarningColor : ErrorColor;
 
-                            Console.Write(String.Format("{0,-25} {1,-10} ", name, total));
+                            Console.Write("{0,-25} {1,-10} ", name, total);
                             Console.ForegroundColor = SuccessColor;
-                            Console.Write(String.Format("{0,-10} ", present));
-                            Console.ForegroundColor = WarningColor;
-                            Console.Write(String.Format("{0,-10} ", absent));
+                            Console.Write("{0,-10} ", present);
+                            Console.ForegroundColor = WarningColor; // Orange/Yellow for Absent count
+                            Console.Write("{0,-10} ", absent);
                             Console.ForegroundColor = pctColor;
-                            Console.WriteLine(String.Format("{0,-8}", pct + "%"));
+                            Console.WriteLine("{0,-8}", pct + "%");
                             Console.ResetColor();
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                PrintError(ex.Message);
-            }
+            catch (Exception ex) { PrintError(ex.Message); }
 
             Console.WriteLine("\nPress any key to continue...");
             Console.ReadKey();
@@ -535,11 +503,11 @@ namespace Student_Management_System__SMS_.DataAccess
         // ===============================
         public void ViewAcademicReport()
         {
-            PrintHeader("            ACADEMIC PERFORMANCE REPORT");
+            PrintHeader("ACADEMIC PERFORMANCE REPORT");
 
-            Console.ForegroundColor = TableHeaderColor;
-            Console.WriteLine(String.Format("{0,-10} {1,-20} {2,-8} {3,-6} {4,-6} {5,-8} {6,-8} {7,-10}",
-                "Code", "Name", "Total", "Avg", "Grade", "Present", "Absent", "Status"));
+            Console.ForegroundColor = HeaderColor;
+            Console.WriteLine("{0,-10} {1,-20} {2,-8} {3,-6} {4,-6} {5,-8} {6,-8} {7,-10}",
+                "Code", "Name", "Total", "Avg", "Grade", "Present", "Absent", "Status");
             Console.WriteLine(new string('─', 85));
             Console.ResetColor();
 
@@ -550,14 +518,14 @@ namespace Student_Management_System__SMS_.DataAccess
                     conn.Open();
 
                     string sql = @"
-                        SELECT s.StudentCode, s.FullName, 
-                               sc.Python, sc.OOP_OOM, sc.WritingII, sc.DatabaseSystem, 
-                               sc.Microprocessor, sc.Network, sc.CoreEnglish,
-                               (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Present') as PresentCount,
-                               (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Absent') as AbsentCount
-                        FROM Students s 
-                        JOIN Scores sc ON s.StudentId = sc.StudentId
-                        ORDER BY s.StudentCode ASC";
+                    SELECT s.StudentCode, s.FullName, 
+                           sc.Python, sc.OOP_OOM, sc.WritingII, sc.DatabaseSystem, 
+                           sc.Microprocessor, sc.Network, sc.CoreEnglish,
+                           (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Present') as PresentCount,
+                           (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Status = 'Absent') as AbsentCount
+                    FROM Students s 
+                    JOIN Scores sc ON s.StudentId = sc.StudentId
+                    ORDER BY s.StudentCode ASC";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     using (var reader = cmd.ExecuteReader())
@@ -576,9 +544,11 @@ namespace Student_Management_System__SMS_.DataAccess
                             if (name.Length > 18) name = name.Substring(0, 17) + "...";
 
                             float total = 0;
+                            // Loop through columns 2 to 8 (The 7 subjects)
                             for (int i = 2; i <= 8; i++)
                             {
-                                if (!reader.IsDBNull(i)) total += (float)reader.GetDecimal(i);
+                                // Changed to Convert.ToSingle for safety
+                                if (!reader.IsDBNull(i)) total += Convert.ToSingle(reader.GetValue(i));
                             }
 
                             long present = reader.GetInt64(9);
@@ -603,8 +573,8 @@ namespace Student_Management_System__SMS_.DataAccess
                                 statusColor = avg >= 60 ? SuccessColor : ErrorColor;
                             }
 
-                            Console.Write(String.Format("{0,-10} {1,-20} {2,-8} {3,-6} {4,-6} {5,-8} {6,-8} ",
-                                code, name, total, avgDisplay, gradeDisplay, present, absent));
+                            Console.Write("{0,-10} {1,-20} {2,-8} {3,-6} {4,-6} {5,-8} {6,-8} ",
+                                code, name, total, avgDisplay, gradeDisplay, present, absent);
 
                             Console.ForegroundColor = statusColor;
                             Console.WriteLine(statusDisplay);
@@ -613,16 +583,13 @@ namespace Student_Management_System__SMS_.DataAccess
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                PrintError(ex.Message);
-            }
+            catch (Exception ex) { PrintError(ex.Message); }
 
             Console.WriteLine("\nPress any key to go back...");
             Console.ReadKey();
         }
 
-        public string CalculateGrade(float avg)
+        private string CalculateGrade(float avg)
         {
             if (avg >= 90) return "A";
             if (avg >= 80) return "B";
@@ -630,7 +597,6 @@ namespace Student_Management_System__SMS_.DataAccess
             if (avg >= 60) return "D";
             return "F";
         }
-
         // ==========================================
         // 7. UPDATE STUDENT INFO
         // ==========================================
@@ -790,6 +756,138 @@ namespace Student_Management_System__SMS_.DataAccess
             }
 
             Console.WriteLine("\nPress any key to continue...");
+            Console.ReadKey();
+        }
+        // ==========================================
+        // 9. REVIEW PERMISSION REQUESTS (EXCUSES)
+        // ==========================================
+        public void ReviewExcuses()
+        {
+            PrintHeader("REVIEW STUDENT EXCUSES");
+
+            // 1. LIST TO STORE DATA (We fetch first, process later)
+            var requests = new List<dynamic>();
+
+            try
+            {
+                // STEP A: FETCH DATA ONLY
+                using (var conn = DbHelper.GetConnection())
+                {
+                    conn.Open();
+                    string sql = @"
+                SELECT e.ExcuseId, s.StudentCode, s.FullName, e.ClassDate, e.Reason, s.StudentId 
+                FROM Excuses e
+                JOIN Students s ON e.StudentId = s.StudentId
+                WHERE e.Status = 'Pending'
+                ORDER BY e.ClassDate DESC";
+
+                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            requests.Add(new
+                            {
+                                Id = reader.GetInt32(0),
+                                Code = reader.GetString(1),
+                                Name = reader.GetString(2),
+                                Date = reader.GetDateTime(3),
+                                Reason = reader.GetString(4),
+                                StudentId = reader.GetInt32(5)
+                            });
+                        }
+                    }
+                } // Connection 1 closes here. Safe!
+
+                if (requests.Count == 0)
+                {
+                    PrintSuccess("No pending requests.");
+                    Console.WriteLine("\nPress any key to return...");
+                    Console.ReadKey();
+                    return;
+                }
+
+                // STEP B: PROCESS REQUESTS (Ask User & Save)
+                foreach (var req in requests)
+                {
+                    Console.WriteLine($"\nStudent: {req.Code} - {req.Name}");
+                    Console.WriteLine($"Date:    {req.Date:yyyy-MM-dd}");
+                    Console.WriteLine($"Reason:  {req.Reason}");
+                    Console.WriteLine(new string('-', 40));
+
+                    string choice = "";
+                    while (true)
+                    {
+                        Console.Write("Accept this excuse? (Y/N/Skip): ");
+                        choice = Console.ReadLine()?.Trim().ToUpper();
+                        if (choice == "Y" || choice == "N" || choice == "SKIP") break;
+                    }
+
+                    if (choice == "SKIP") continue;
+
+                    string status = (choice == "Y") ? "Accepted" : "Rejected";
+                    string attendanceStatus = (choice == "Y") ? "Present" : "Absent";
+
+                    // STEP C: SAVE CHANGES (Open a NEW FRESH connection for every save)
+                    try
+                    {
+                        using (var conn = DbHelper.GetConnection())
+                        {
+                            conn.Open();
+                            using (var trans = conn.BeginTransaction())
+                            {
+                                try
+                                {
+                                    // 1. Update Excuse Status
+                                    using (var cmd = new NpgsqlCommand("UPDATE Excuses SET Status = @st WHERE ExcuseId = @id", conn))
+                                    {
+                                        cmd.Parameters.AddWithValue("st", status);
+                                        cmd.Parameters.AddWithValue("id", req.Id);
+                                        cmd.ExecuteNonQuery();
+                                    }
+
+                                    // 2. Update Attendance
+                                    string attendSql = @"
+                                INSERT INTO Attendance (StudentId, Subject, ClassDate, Status)
+                                VALUES (@sid, @sub, @date, @stat)
+                                ON CONFLICT (StudentId, Subject, ClassDate)
+                                DO UPDATE SET Status = @stat";
+
+                                    using (var cmd = new NpgsqlCommand(attendSql, conn))
+                                    {
+                                        cmd.Parameters.AddWithValue("sid", req.StudentId);
+                                        cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+                                        cmd.Parameters.AddWithValue("date", req.Date);
+                                        cmd.Parameters.AddWithValue("stat", attendanceStatus);
+                                        cmd.ExecuteNonQuery();
+                                    }
+
+                                    trans.Commit();
+
+                                    if (choice == "Y") PrintSuccess("Accepted & Marked Present.");
+                                    else PrintError("Rejected & Marked Absent.");
+                                }
+                                catch (Exception ex)
+                                {
+                                    trans.Rollback();
+                                    PrintError("Save failed: " + ex.Message);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        PrintError("Connection error: " + ex.Message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError("Error loading requests: " + ex.Message);
+            }
+
+            Console.WriteLine("\nAll pending requests reviewed.");
+            Console.WriteLine("Press any key to return...");
             Console.ReadKey();
         }
     }
