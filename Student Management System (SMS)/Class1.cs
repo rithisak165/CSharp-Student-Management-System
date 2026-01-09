@@ -133,6 +133,7 @@ namespace Student_Management_System__SMS_
             Console.WriteLine("7. Update Student Info");
             Console.WriteLine("8. Delete Student");
             Console.WriteLine("9. Review Excuses");
+            Console.WriteLine("10. Cancel Class");
             Console.WriteLine("0. Logout");
             Console.Write("Select: ");
 
@@ -147,6 +148,7 @@ namespace Student_Management_System__SMS_
                 case "7": teacher.UpdateStudentInfo(); break;
                 case "8": teacher.DeleteStudent(); break;
                 case "9": teacher.ReviewExcuses(); break;      // Uses Subject Logic
+                case "10":teacher.AnnounceNoClass(); break;
                 case "0": currentUser = null; break;
                 default: Console.WriteLine("Invalid option."); break;
             }
@@ -161,22 +163,24 @@ namespace Student_Management_System__SMS_
 
             Console.Clear();
             Console.WriteLine("=== STUDENT DASHBOARD ===");
-            Console.WriteLine("1. View My Scores");
-            Console.WriteLine("2. View My Attendance");
-            Console.WriteLine("3. View Academic Report");
-            Console.WriteLine("4. Send Absence Excuse");
-            Console.WriteLine("5. View My Profile");
-            Console.WriteLine("6. Logout");
+            Console.WriteLine("1. View Class Information");
+            Console.WriteLine("2. View My Scores");
+            Console.WriteLine("3. View My Attendance");
+            Console.WriteLine("4. View Academic Report");
+            Console.WriteLine("5. Send Absence Excuse");
+            Console.WriteLine("6. View My Profile");
+            Console.WriteLine("7. Logout");
             Console.Write("Select: ");
 
             switch (Console.ReadLine())
             {
-                case "1": student.ViewMyScores(); break;
-                case "2": student.ViewMyAttendance(); break;
-                case "3": student.ViewAcademicReport(); break;
-                case "4": student.RequestPermission(); break;
-                case "5": student.ViewProfile(); break;
-                case "6": currentUser = null; break;
+                case "1": student.ViewClassInfo(); break;
+                case "2": student.ViewMyScores(); break;
+                case "3": student.ViewMyAttendance(); break;
+                case "4": student.ViewAcademicReport(); break;
+                case "5": student.RequestPermission(); break;
+                case "6": student.ViewProfile(); break;
+                case "7": currentUser = null; break;
                 default: Console.WriteLine("Invalid option."); break;
             }
         }

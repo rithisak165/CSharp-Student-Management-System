@@ -442,62 +442,74 @@ namespace Student_Management_System__SMS_.DataAccess
         // ==========================================
         public void ViewAttendanceReport()
         {
-            PrintHeader("ATTENDANCE REPORT");
+            PrintHeader($"ATTENDANCE REPORT: {currentUser.Subject}");
 
-            Console.ForegroundColor = HeaderColor;
-            Console.WriteLine("{0,-25} {1,-10} {2,-10} {3,-10} {4,-8}",
-                "Student Name", "Total", "Present", "Absent", "Percent");
-            Console.WriteLine(new string('─', 70));
-            Console.ResetColor();
-
-            try
+            using (var conn = DbHelper.GetConnection())
             {
-                using (var conn = DbHelper.GetConnection())
-                {
-                    conn.Open();
-                    string sql = @"
-                    SELECT s.FullName, 
-                           COUNT(a.AttendanceId) as Total,
-                           SUM(CASE WHEN a.Status = 'Present' THEN 1 ELSE 0 END) as PresentCount,
-                           SUM(CASE WHEN a.Status = 'Absent' THEN 1 ELSE 0 END) as AbsentCount
-                    FROM Students s
-                    LEFT JOIN Attendance a ON s.StudentId = a.StudentId
-                    GROUP BY s.StudentId, s.FullName
-                    ORDER BY s.FullName";
+                conn.Open();
 
-                    using (var cmd = new NpgsqlCommand(sql, conn))
+                // ========================================================
+                // 1. SAFETY CHECK: Did the class even start?
+                // ========================================================
+                // We count how many attendance rows exist for this Subject.
+                string checkSql = "SELECT COUNT(*) FROM Attendance WHERE Subject = @sub";
+                using (var cmd = new NpgsqlCommand(checkSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+                    long totalRecords = (long)cmd.ExecuteScalar();
+
+                    if (totalRecords == 0)
+                    {
+                        // If the count is 0, it means NO ONE has been marked yet.
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"\nNotice: No attendance records found for {currentUser.Subject}.");
+                        Console.WriteLine("The class has not started yet (or no records entered).");
+                        Console.ResetColor();
+
+                        Console.WriteLine("\nPress any key to return...");
+                        Console.ReadKey();
+                        return; // Stop here. Don't show the table.
+                    }
+                }
+
+                // ========================================================
+                // 2. SHOW REPORT (Only if records exist)
+                // ========================================================
+                string sql = @"
+            SELECT s.StudentCode, s.FullName, 
+                   COUNT(CASE WHEN a.Status = 'Present' THEN 1 END) as PresentCount,
+                   COUNT(CASE WHEN a.Status = 'Absent' THEN 1 END) as AbsentCount
+            FROM Students s
+            LEFT JOIN Attendance a ON s.StudentId = a.StudentId 
+                 AND a.Subject = @sub  -- Ensure we only count THIS subject
+            GROUP BY s.StudentId, s.StudentCode, s.FullName
+            ORDER BY s.StudentCode";
+
+                using (var cmd = new NpgsqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+
                     using (var reader = cmd.ExecuteReader())
                     {
-                        if (!reader.HasRows) Console.WriteLine("No attendance records yet.");
+                        Console.WriteLine("{0,-10} {1,-20} {2,-10} {3,-10}", "Code", "Name", "Present", "Absent");
+                        Console.WriteLine(new string('-', 55));
 
                         while (reader.Read())
                         {
-                            string name = reader.GetString(0);
-                            long total = reader.GetInt64(1);
-                            long present = reader.IsDBNull(2) ? 0 : reader.GetInt64(2);
-                            long absent = reader.IsDBNull(3) ? 0 : reader.GetInt64(3);
-                            double pct = total == 0 ? 0 : Math.Round((double)present / total * 100, 1);
+                            string code = reader.GetString(0);
+                            string name = reader.GetString(1);
+                            long present = reader.GetInt64(2);
+                            long absent = reader.GetInt64(3);
 
-                            ConsoleColor pctColor = pct >= 90 ? SuccessColor : pct >= 70 ? WarningColor : ErrorColor;
-
-                            Console.Write("{0,-25} {1,-10} ", name, total);
-                            Console.ForegroundColor = SuccessColor;
-                            Console.Write("{0,-10} ", present);
-                            Console.ForegroundColor = WarningColor; // Orange/Yellow for Absent count
-                            Console.Write("{0,-10} ", absent);
-                            Console.ForegroundColor = pctColor;
-                            Console.WriteLine("{0,-8}", pct + "%");
-                            Console.ResetColor();
+                            // If a specific student is 0|0, they just haven't attended THIS subject yet.
+                            Console.WriteLine("{0,-10} {1,-20} {2,-10} {3,-10}", code, name, present, absent);
                         }
                     }
                 }
             }
-            catch (Exception ex) { PrintError(ex.Message); }
-
-            Console.WriteLine("\nPress any key to continue...");
+            Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
-
         // ===============================
         // 6. VIEW ACADEMIC REPORT
         // ===============================
@@ -699,16 +711,17 @@ namespace Student_Management_System__SMS_.DataAccess
         // ==========================================
         public void DeleteStudent()
         {
-            PrintHeader("           DELETE STUDENT");
+            PrintHeader("            DELETE STUDENT");
 
-            PrintWarning("This action will permanently delete the student and ALL related data (scores, attendance, login).");
+            PrintWarning("This action will permanently delete the student and ALL related data (scores, attendance, excuses, login).");
             Console.Write("\nEnter Student Code: ");
             string code = Console.ReadLine();
             Console.Write($"\nType 'DELETE {code}' to confirm: ");
             string confirm = Console.ReadLine();
-            if (confirm != $"DELETE {code}"|| confirm == "no" || confirm == "No")
+
+            if (confirm != $"DELETE {code}")
             {
-                Console.WriteLine("Deletion cancelled or Wrong student ID");
+                Console.WriteLine("Deletion cancelled.");
                 Console.ReadKey();
                 return;
             }
@@ -719,6 +732,7 @@ namespace Student_Management_System__SMS_.DataAccess
                 {
                     conn.Open();
 
+                    // 1. Find the Student ID
                     string findSql = "SELECT StudentId FROM Students WHERE StudentCode = @c";
                     int studentId = 0;
 
@@ -735,11 +749,14 @@ namespace Student_Management_System__SMS_.DataAccess
                         studentId = (int)result;
                     }
 
+                    // 2. Delete EVERYTHING related to this ID
+                    // I added "DELETE FROM Excuses" to the top of this list.
                     string masterDeleteSql = @"
-                        DELETE FROM Attendance WHERE StudentId = @id;
-                        DELETE FROM Scores WHERE StudentId = @id;
-                        DELETE FROM Users WHERE StudentId = @id;
-                        DELETE FROM Students WHERE StudentId = @id;";
+                DELETE FROM Excuses WHERE StudentId = @id;     -- <--- NEW LINE ADDED
+                DELETE FROM Attendance WHERE StudentId = @id;
+                DELETE FROM Scores WHERE StudentId = @id;
+                DELETE FROM Users WHERE StudentId = @id;
+                DELETE FROM Students WHERE StudentId = @id;";
 
                     using (var cmd = new NpgsqlCommand(masterDeleteSql, conn))
                     {
@@ -765,129 +782,207 @@ namespace Student_Management_System__SMS_.DataAccess
         {
             PrintHeader("REVIEW STUDENT EXCUSES");
 
-            // 1. LIST TO STORE DATA (We fetch first, process later)
+            if (string.IsNullOrEmpty(currentUser.Subject) || currentUser.Subject == "General")
+            {
+                PrintError("Error: Your account does not have a specific Subject assigned.");
+                Console.ReadKey();
+                return;
+            }
+
+            // 1. GET DATA
             var requests = new List<dynamic>();
 
             try
             {
-                // STEP A: FETCH DATA ONLY
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
+                    // FIXED SQL: Added "AND e.Subject = @sub"
                     string sql = @"
                 SELECT e.ExcuseId, s.StudentCode, s.FullName, e.ClassDate, e.Reason, s.StudentId 
                 FROM Excuses e
                 JOIN Students s ON e.StudentId = s.StudentId
-                WHERE e.Status = 'Pending'
+                WHERE e.Status = 'Pending' AND e.Subject = @sub
                 ORDER BY e.ClassDate DESC";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
-                    using (var reader = cmd.ExecuteReader())
                     {
-                        while (reader.Read())
+                        // Pass the teacher's subject to filter the list
+                        cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+
+                        using (var reader = cmd.ExecuteReader())
                         {
-                            requests.Add(new
+                            while (reader.Read())
                             {
-                                Id = reader.GetInt32(0),
-                                Code = reader.GetString(1),
-                                Name = reader.GetString(2),
-                                Date = reader.GetDateTime(3),
-                                Reason = reader.GetString(4),
-                                StudentId = reader.GetInt32(5)
-                            });
-                        }
-                    }
-                } // Connection 1 closes here. Safe!
-
-                if (requests.Count == 0)
-                {
-                    PrintSuccess("No pending requests.");
-                    Console.WriteLine("\nPress any key to return...");
-                    Console.ReadKey();
-                    return;
-                }
-
-                // STEP B: PROCESS REQUESTS (Ask User & Save)
-                foreach (var req in requests)
-                {
-                    Console.WriteLine($"\nStudent: {req.Code} - {req.Name}");
-                    Console.WriteLine($"Date:    {req.Date:yyyy-MM-dd}");
-                    Console.WriteLine($"Reason:  {req.Reason}");
-                    Console.WriteLine(new string('-', 40));
-
-                    string choice = "";
-                    while (true)
-                    {
-                        Console.Write("Accept this excuse? (Y/N/Skip): ");
-                        choice = Console.ReadLine()?.Trim().ToUpper();
-                        if (choice == "Y" || choice == "N" || choice == "SKIP") break;
-                    }
-
-                    if (choice == "SKIP") continue;
-
-                    string status = (choice == "Y") ? "Accepted" : "Rejected";
-                    string attendanceStatus = (choice == "Y") ? "Present" : "Absent";
-
-                    // STEP C: SAVE CHANGES (Open a NEW FRESH connection for every save)
-                    try
-                    {
-                        using (var conn = DbHelper.GetConnection())
-                        {
-                            conn.Open();
-                            using (var trans = conn.BeginTransaction())
-                            {
-                                try
+                                requests.Add(new
                                 {
-                                    // 1. Update Excuse Status
-                                    using (var cmd = new NpgsqlCommand("UPDATE Excuses SET Status = @st WHERE ExcuseId = @id", conn))
-                                    {
-                                        cmd.Parameters.AddWithValue("st", status);
-                                        cmd.Parameters.AddWithValue("id", req.Id);
-                                        cmd.ExecuteNonQuery();
-                                    }
-
-                                    // 2. Update Attendance
-                                    string attendSql = @"
-                                INSERT INTO Attendance (StudentId, Subject, ClassDate, Status)
-                                VALUES (@sid, @sub, @date, @stat)
-                                ON CONFLICT (StudentId, Subject, ClassDate)
-                                DO UPDATE SET Status = @stat";
-
-                                    using (var cmd = new NpgsqlCommand(attendSql, conn))
-                                    {
-                                        cmd.Parameters.AddWithValue("sid", req.StudentId);
-                                        cmd.Parameters.AddWithValue("sub", currentUser.Subject);
-                                        cmd.Parameters.AddWithValue("date", req.Date);
-                                        cmd.Parameters.AddWithValue("stat", attendanceStatus);
-                                        cmd.ExecuteNonQuery();
-                                    }
-
-                                    trans.Commit();
-
-                                    if (choice == "Y") PrintSuccess("Accepted & Marked Present.");
-                                    else PrintError("Rejected & Marked Absent.");
-                                }
-                                catch (Exception ex)
-                                {
-                                    trans.Rollback();
-                                    PrintError("Save failed: " + ex.Message);
-                                }
+                                    Id = reader.GetInt32(0),
+                                    Code = reader.GetString(1),
+                                    Name = reader.GetString(2),
+                                    Date = reader.GetDateTime(3),
+                                    Reason = reader.GetString(4),
+                                    StudentId = reader.GetInt32(5)
+                                });
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        PrintError("Connection error: " + ex.Message);
                     }
                 }
             }
             catch (Exception ex)
             {
                 PrintError("Error loading requests: " + ex.Message);
+                return;
+            }
+
+            if (requests.Count == 0)
+            {
+                PrintSuccess($"No pending requests for {currentUser.Subject}.");
+                Console.WriteLine("\nPress any key to return...");
+                Console.ReadKey();
+                return;
+            }
+
+            // 2. LOOP THROUGH REQUESTS
+            foreach (var req in requests)
+            {
+                Console.WriteLine($"\nStudent: {req.Code} - {req.Name}");
+                Console.WriteLine($"Date:    {req.Date:yyyy-MM-dd}");
+                Console.WriteLine($"Reason:  {req.Reason}");
+                Console.WriteLine($"Subject: {currentUser.Subject}"); // Now this is actually correct
+                Console.WriteLine(new string('-', 40));
+
+                string choice = "";
+                while (true)
+                {
+                    Console.Write("Accept this excuse? (Y/N/Skip): ");
+                    choice = Console.ReadLine()?.Trim().ToUpper();
+                    if (choice == "Y" || choice == "N" || choice == "SKIP") break;
+                }
+
+                if (choice == "SKIP") continue;
+
+                string status = (choice == "Y") ? "Accepted" : "Rejected";
+                // If Accepted, they are marked Present. If Rejected, they are Absent.
+                string attendanceStatus = (choice == "Y") ? "Present" : "Absent";
+
+                try
+                {
+                    using (var conn = DbHelper.GetConnection())
+                    {
+                        conn.Open();
+
+                        // Command 1: Update Excuse Status
+                        string sql1 = "UPDATE Excuses SET Status = @st WHERE ExcuseId = @id";
+                        using (var cmd = new NpgsqlCommand(sql1, conn))
+                        {
+                            cmd.Parameters.AddWithValue("st", status);
+                            cmd.Parameters.AddWithValue("id", req.Id);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // Command 2: Update Attendance
+                        string sql2 = @"
+                    INSERT INTO Attendance (StudentId, Subject, ClassDate, Status)
+                    VALUES (@sid, @sub, @date, @stat)
+                    ON CONFLICT (StudentId, Subject, ClassDate)
+                    DO UPDATE SET Status = @stat";
+
+                        using (var cmd = new NpgsqlCommand(sql2, conn))
+                        {
+                            cmd.Parameters.AddWithValue("sid", req.StudentId);
+                            cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+                            cmd.Parameters.AddWithValue("date", req.Date);
+                            cmd.Parameters.AddWithValue("stat", attendanceStatus);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    if (choice == "Y") PrintSuccess("Saved: Accepted.");
+                    else PrintError("Saved: Rejected.");
+                }
+                catch (Exception ex)
+                {
+                    PrintError("Save Error: " + ex.Message);
+                }
             }
 
             Console.WriteLine("\nAll pending requests reviewed.");
-            Console.WriteLine("Press any key to return...");
+            Console.ReadKey();
+        }
+        // ==========================================
+        // 10. ANNOUNCE CLASS UPDATE / CANCELLATION
+        // ==========================================
+        public void AnnounceNoClass()
+        {
+            Console.Clear();
+            PrintHeader("ANNOUNCE CLASS UPDATE / CANCELLATION");
+
+            // Ensure Teacher has a subject
+            if (currentUser == null || string.IsNullOrEmpty(currentUser.Subject) || currentUser.Subject == "General")
+            {
+                PrintError("Error: Your account does not have a specific Subject assigned.");
+                Console.ReadKey();
+                return;
+            }
+
+            Console.WriteLine($"Subject: {currentUser.Subject}\n");
+
+            // 1. Get Date
+            DateTime date = DateTime.Today;
+            Console.Write($"Enter Date (YYYY-MM-DD) [Default: {date:yyyy-MM-dd}]: ");
+            string dateInput = Console.ReadLine()?.Trim();
+
+            if (dateInput == "0") return;
+            if (!string.IsNullOrEmpty(dateInput))
+            {
+                if (!DateTime.TryParse(dateInput, out date))
+                {
+                    PrintWarning("Invalid date. Using today's date.");
+                    date = DateTime.Today;
+                }
+            }
+
+            // 2. Get Message (Reason)
+            string message = "";
+            while (string.IsNullOrWhiteSpace(message))
+            {
+                Console.Write("Enter Message (e.g., 'No Class', 'Sick', 'Holiday'): ");
+                message = Console.ReadLine()?.Trim();
+                if (message == "0") return;
+                if (string.IsNullOrWhiteSpace(message)) PrintWarning("Message cannot be empty.");
+            }
+
+            // 3. Save to Database
+            try
+            {
+                using (var conn = DbHelper.GetConnection())
+                {
+                    conn.Open();
+
+                    // Upsert: If date exists for this subject, update the message. If not, insert new.
+                    string sql = @"
+                INSERT INTO ClassInfo (Subject, ClassDate, Message)
+                VALUES (@sub, @date, @msg)
+                ON CONFLICT (Subject, ClassDate)
+                DO UPDATE SET Message = @msg";
+
+                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+                        cmd.Parameters.AddWithValue("date", date);
+                        cmd.Parameters.AddWithValue("msg", message);
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    PrintSuccess($"Announcement for {currentUser.Subject} on {date:yyyy-MM-dd} saved!");
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError("Database Error: " + ex.Message);
+            }
+
+            Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
     }
