@@ -346,21 +346,24 @@ namespace Student_Management_System__SMS_.DataAccess
         // ==========================================
         public void RecordAttendance()
         {
-            // Debug check
-            Console.WriteLine("\n*** NEW CODE LOADED: RecordAttendance ***\n");
+            // Use Today's Date automatically (Old Logic)
+            DateTime date = DateTime.Today;
 
             if (currentUser == null || string.IsNullOrEmpty(currentUser.Subject))
             {
-                Console.WriteLine("Error: No Subject assigned.");
+                PrintError("Error: No Subject assigned.");
                 Console.ReadKey();
                 return;
             }
 
             Console.Clear();
             Console.WriteLine($"=== ATTENDANCE: {currentUser.Subject} ===");
-            DateTime date = DateTime.Today;
             Console.WriteLine($"Date: {date:yyyy-MM-dd}\n");
-            Console.WriteLine("Press 'Y' for Present, 'N' for Absent.\n");
+            Console.WriteLine("Instruction: Press 'Y' for Present, 'N' for Absent.");
+            Console.WriteLine("(If a student has an excuse, you will be asked to Allow it first)\n");
+
+            // Clean subject name for searching excuses (Space insensitive)
+            string cleanSubject = currentUser.Subject.Split('_')[0].Replace(" ", "");
 
             try
             {
@@ -368,16 +371,15 @@ namespace Student_Management_System__SMS_.DataAccess
                 {
                     conn.Open();
 
-                    // 1. Get Students
-                    var students = new List<Student>();
-                    string sql = "SELECT StudentId, FullName, StudentCode FROM Students ORDER BY StudentCode ASC";
-
-                    using (var cmd = new NpgsqlCommand(sql, conn))
+                    // 1. GET STUDENTS
+                    var students = new List<dynamic>();
+                    string sqlStudents = "SELECT StudentId, FullName, StudentCode FROM Students ORDER BY StudentCode ASC";
+                    using (var cmd = new NpgsqlCommand(sqlStudents, conn))
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
                         {
-                            students.Add(new Student
+                            students.Add(new
                             {
                                 StudentId = reader.GetInt32(0),
                                 FullName = reader.GetString(1),
@@ -386,37 +388,103 @@ namespace Student_Management_System__SMS_.DataAccess
                         }
                     }
 
-                    // 2. Loop
+                    // 2. GET EXCUSES (Only for TODAY and THIS SUBJECT)
+                    var excuses = new Dictionary<int, dynamic>();
+                    string sqlExcuses = @"
+                SELECT StudentId, Reason, ExcuseId 
+                FROM Excuses 
+                WHERE ClassDate = @date 
+                  AND Status = 'Pending'
+                  AND (REPLACE(Subject, ' ', '') ILIKE @sub OR @sub ILIKE '%' || REPLACE(Subject, ' ', '') || '%')";
+
+                    using (var cmd = new NpgsqlCommand(sqlExcuses, conn))
+                    {
+                        cmd.Parameters.AddWithValue("date", date);
+                        cmd.Parameters.AddWithValue("sub", cleanSubject);
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                excuses[reader.GetInt32(0)] = new
+                                {
+                                    Reason = reader.GetString(1),
+                                    ExcuseId = reader.GetInt32(2)
+                                };
+                            }
+                        }
+                    }
+
+                    // 3. LOOP THROUGH STUDENTS
                     int presentCount = 0;
                     foreach (var s in students)
                     {
                         Console.Write($"{s.StudentCode} - {s.FullName}: ");
                         string status = "Absent";
 
-                        while (true)
+                        // --- CHECK: Does this student have an excuse for TODAY? ---
+                        if (excuses.ContainsKey(s.StudentId))
                         {
-                            var key = Console.ReadKey(intercept: true).Key;
-                            if (key == ConsoleKey.Y)
+                            var excuse = excuses[s.StudentId];
+
+                            // Show the Excuse Prompt
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.Write($"\n   [?] Excuse Request: \"{excuse.Reason}\"\n   Allow? (Y=Present / N=Absent): ");
+                            Console.ResetColor();
+
+                            string decision = Console.ReadLine()?.Trim().ToUpper();
+
+                            if (decision == "Y")
                             {
-                                Console.Write(" Present\n");
                                 status = "Present";
                                 presentCount++;
-                                break;
+                                // Update Excuse DB -> Accepted
+                                using (var updateCmd = new NpgsqlCommand("UPDATE Excuses SET Status = 'Accepted' WHERE ExcuseId = @eid", conn))
+                                {
+                                    updateCmd.Parameters.AddWithValue("eid", excuse.ExcuseId);
+                                    updateCmd.ExecuteNonQuery();
+                                }
+                                Console.WriteLine("   -> Allowed. Marked Present.");
                             }
-                            if (key == ConsoleKey.N)
+                            else
                             {
-                                Console.Write(" Absent\n");
                                 status = "Absent";
-                                break;
+                                // Update Excuse DB -> Rejected
+                                using (var updateCmd = new NpgsqlCommand("UPDATE Excuses SET Status = 'Rejected' WHERE ExcuseId = @eid", conn))
+                                {
+                                    updateCmd.Parameters.AddWithValue("eid", excuse.ExcuseId);
+                                    updateCmd.ExecuteNonQuery();
+                                }
+                                Console.WriteLine("   -> Denied. Marked Absent.");
+                            }
+                        }
+                        else
+                        {
+                            // --- NO EXCUSE: Use your OLD Logic (Key Press) ---
+                            while (true)
+                            {
+                                var key = Console.ReadKey(intercept: true).Key;
+                                if (key == ConsoleKey.Y)
+                                {
+                                    Console.Write(" Present\n");
+                                    status = "Present";
+                                    presentCount++;
+                                    break;
+                                }
+                                if (key == ConsoleKey.N)
+                                {
+                                    Console.Write(" Absent\n");
+                                    status = "Absent";
+                                    break;
+                                }
                             }
                         }
 
-                        // 3. Insert/Update Attendance
-                        // Matches your DB table structure exactly
-                        string insert = @"INSERT INTO Attendance (StudentId, Subject, ClassDate, Status) 
-                                          VALUES (@sid, @sub, @date, @stat)
-                                          ON CONFLICT (StudentId, Subject, ClassDate) 
-                                          DO UPDATE SET Status = @stat";
+                        // 4. INSERT/UPDATE ATTENDANCE
+                        string insert = @"
+                    INSERT INTO Attendance (StudentId, Subject, ClassDate, Status) 
+                    VALUES (@sid, @sub, @date, @stat)
+                    ON CONFLICT (StudentId, Subject, ClassDate) 
+                    DO UPDATE SET Status = @stat";
 
                         using (var cmd = new NpgsqlCommand(insert, conn))
                         {
@@ -436,7 +504,6 @@ namespace Student_Management_System__SMS_.DataAccess
             }
             Console.ReadKey();
         }
-
         // ==========================================
         // 5. VIEW ATTENDANCE REPORT
         // ==========================================
@@ -778,9 +845,9 @@ namespace Student_Management_System__SMS_.DataAccess
         // ==========================================
         // 9. REVIEW PERMISSION REQUESTS (EXCUSES)
         // ==========================================
-        public void ReviewExcuses()
+        public void ViewBehaviorReport()
         {
-            PrintHeader("REVIEW STUDENT EXCUSES");
+            PrintHeader("DETAILED BEHAVIOR REPORT");
 
             if (string.IsNullOrEmpty(currentUser.Subject))
             {
@@ -789,14 +856,11 @@ namespace Student_Management_System__SMS_.DataAccess
                 return;
             }
 
-            // 1. CLEAN TEACHER SUBJECT (Handle "_OOM" suffix & Spaces)
-            string cleanTeacherSubject = currentUser.Subject.Split('_')[0];
-            string compareTeacherVal = cleanTeacherSubject.Replace(" ", "");
+            Console.WriteLine($"Subject: {currentUser.Subject}");
+            Console.WriteLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm}\n");
 
-            Console.WriteLine($"[System] Teacher Account: {currentUser.Subject}");
-            Console.WriteLine($"[System] Looking for requests matching: '{cleanTeacherSubject}' (ignoring spaces)...\n");
-
-            var requests = new List<dynamic>();
+            var goodStudents = new List<string>();
+            var badStudents = new List<string>();
 
             try
             {
@@ -804,124 +868,118 @@ namespace Student_Management_System__SMS_.DataAccess
                 {
                     conn.Open();
 
-                    // 2. SMART SQL QUERY (Space Insensitive)
+                    // SQL: Get Counts AND The List of Dates for Absences/Requests
+                    // STRING_AGG joins the dates into a single text string like "2023-01-01, 2023-01-05"
                     string sql = @"
-                SELECT e.ExcuseId, s.StudentCode, s.FullName, e.ClassDate, e.Reason, s.StudentId, e.Subject 
-                FROM Excuses e
-                JOIN Students s ON e.StudentId = s.StudentId
-                WHERE e.Status = 'Pending' 
-                  AND (
-                      REPLACE(e.Subject, ' ', '') ILIKE @compareVal
-                      OR 
-                      @compareVal ILIKE '%' || REPLACE(e.Subject, ' ', '') || '%' 
-                  )
-                ORDER BY e.ClassDate DESC";
+                SELECT 
+                    s.StudentCode, 
+                    s.FullName,
+                    -- 2. Count Presents
+                    (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Subject = @sub AND a.Status = 'Present') as P_Count,
+                    
+                    -- 3. Count Absents & List Dates
+                    (SELECT COUNT(*) FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Subject = @sub AND a.Status = 'Absent') as A_Count,
+                    (SELECT STRING_AGG(TO_CHAR(ClassDate, 'MM-dd'), ', ') FROM Attendance a WHERE a.StudentId = s.StudentId AND a.Subject = @sub AND a.Status = 'Absent') as A_Dates,
+
+                    -- 4. Count Requests & List Dates
+                    (SELECT COUNT(*) FROM Excuses e WHERE e.StudentId = s.StudentId AND e.Subject = @sub) as R_Count,
+                    (SELECT STRING_AGG(TO_CHAR(ClassDate, 'MM-dd'), ', ') FROM Excuses e WHERE e.StudentId = s.StudentId AND e.Subject = @sub) as R_Dates
+
+                FROM Students s
+                ORDER BY P_Count DESC";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
-                        cmd.Parameters.AddWithValue("compareVal", compareTeacherVal);
+                        cmd.Parameters.AddWithValue("sub", currentUser.Subject);
 
                         using (var reader = cmd.ExecuteReader())
                         {
                             while (reader.Read())
                             {
-                                requests.Add(new
+                                string code = reader.GetString(0);
+                                string name = reader.GetString(1);
+                                long pCount = reader.GetInt64(2);
+
+                                long aCount = reader.GetInt64(3);
+                                string aDates = reader.IsDBNull(4) ? "" : reader.GetString(4); // Handle nulls
+
+                                long rCount = reader.GetInt64(5);
+                                string rDates = reader.IsDBNull(6) ? "" : reader.GetString(6); // Handle nulls
+
+                                // --- LOGIC ---
+                                // "Bad" if Absents > 3 OR Requests >= 10
+                                if (aCount > 3 || rCount >= 10)
                                 {
-                                    Id = reader.GetInt32(0),
-                                    Code = reader.GetString(1),
-                                    Name = reader.GetString(2),
-                                    Date = reader.GetDateTime(3),
-                                    Reason = reader.GetString(4),
-                                    StudentId = reader.GetInt32(5),
-                                    Subject = reader.GetString(6)
-                                });
+                                    string info = $" {code} - {name}";
+                                    info += $"\n\t   [!] Absences ({aCount}): {aDates}";
+                                    info += $"\n\t   [!] Requests ({rCount}): {rDates}";
+
+                                    // Add a special warning tag
+                                    string reason = (aCount > 3) ? "CRITICAL ABSENCE" : "PERMISSION SPAM";
+                                    badStudents.Add($"{info}\n\t   >>> WARNING: {reason}");
+                                }
+                                else
+                                {
+                                    // Good Student Row
+                                    string row = $" {code,-10} | {name,-18} | Present: {pCount,-3} | Absent: {aCount,-3} (Dates: {aDates})";
+                                    goodStudents.Add(row);
+                                }
                             }
                         }
                     }
                 }
+
+                // ============================================
+                // 1. PRINT GOOD STUDENTS (GREEN)
+                // ============================================
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("================================================================================");
+                Console.WriteLine("   ✅ TOP ATTENDANCE (SAFE ZONE)");
+                Console.WriteLine("================================================================================");
+
+                if (goodStudents.Count > 0)
+                {
+                    foreach (var s in goodStudents)
+                    {
+                        Console.WriteLine(s);
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("   (No students found)");
+                }
+
+                // ============================================
+                // 2. PRINT WARNING STUDENTS (RED)
+                // ============================================
+                Console.WriteLine("\n");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("================================================================================");
+                Console.WriteLine("   ⚠️  WARNING ZONE (List of Days Missed/Requested)");
+                Console.WriteLine("================================================================================");
+
+                if (badStudents.Count > 0)
+                {
+                    foreach (var s in badStudents)
+                    {
+                        Console.WriteLine(s);
+                        Console.WriteLine(new string('-', 74));
+                    }
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine("   (No students at risk)");
+                }
+
+                Console.ResetColor();
             }
             catch (Exception ex)
             {
-                PrintError("Error loading requests: " + ex.Message);
-                return;
+                PrintError("Error generating report: " + ex.Message);
             }
 
-            if (requests.Count == 0)
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"\u2713 No pending requests found for '{cleanTeacherSubject}'.");
-                Console.ResetColor();
-                Console.WriteLine("\nPress any key to return...");
-                Console.ReadKey();
-                return;
-            }
-
-            // 3. PROCESS REQUESTS
-            foreach (var req in requests)
-            {
-                Console.WriteLine($"\nStudent: {req.Code} - {req.Name}");
-                Console.WriteLine($"Date:    {req.Date:yyyy-MM-dd}");
-                Console.WriteLine($"Reason:  {req.Reason}");
-                Console.WriteLine($"Subject: {req.Subject}");
-                Console.WriteLine(new string('-', 40));
-
-                string choice = "";
-                while (true)
-                {
-                    Console.Write("Accept this excuse? (Y/N/Skip): ");
-                    choice = Console.ReadLine()?.Trim().ToUpper();
-                    if (choice == "Y" || choice == "N" || choice == "SKIP") break;
-                }
-
-                if (choice == "SKIP") continue;
-
-                string status = (choice == "Y") ? "Accepted" : "Rejected";
-
-                // --- FIX HERE ---
-                // Changed "Excused" to "Present" because your database strictly requires "Present"
-                string attendanceStatus = (choice == "Y") ? "Present" : "Absent";
-
-                try
-                {
-                    using (var conn = DbHelper.GetConnection())
-                    {
-                        conn.Open();
-
-                        // Update Excuse Status
-                        string sql1 = "UPDATE Excuses SET Status = @st WHERE ExcuseId = @id";
-                        using (var cmd = new NpgsqlCommand(sql1, conn))
-                        {
-                            cmd.Parameters.AddWithValue("st", status);
-                            cmd.Parameters.AddWithValue("id", req.Id);
-                            cmd.ExecuteNonQuery();
-                        }
-
-                        // Update Attendance (Set to Present)
-                        string sql2 = @"
-                    INSERT INTO Attendance (StudentId, Subject, ClassDate, Status)
-                    VALUES (@sid, @sub, @date, @stat)
-                    ON CONFLICT (StudentId, Subject, ClassDate)
-                    DO UPDATE SET Status = @stat";
-
-                        using (var cmd = new NpgsqlCommand(sql2, conn))
-                        {
-                            cmd.Parameters.AddWithValue("sid", req.StudentId);
-                            cmd.Parameters.AddWithValue("sub", req.Subject);
-                            cmd.Parameters.AddWithValue("date", req.Date);
-                            cmd.Parameters.AddWithValue("stat", attendanceStatus);
-                            cmd.ExecuteNonQuery();
-                        }
-                    }
-                    if (choice == "Y") PrintSuccess("Saved: Student marked as Present.");
-                    else PrintError("Saved: Student marked as Absent.");
-                }
-                catch (Exception ex)
-                {
-                    PrintError("Save Error: " + ex.Message);
-                }
-            }
-
-            Console.WriteLine("\nAll pending requests processed.");
+            Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
         // ==========================================

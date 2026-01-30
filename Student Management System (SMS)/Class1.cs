@@ -150,7 +150,7 @@ namespace Student_Management_System__SMS_
             Console.WriteLine("6. View Academic Report");
             Console.WriteLine("7. Update Student Info");
             Console.WriteLine("8. Delete Student");
-            Console.WriteLine("9. Review Excuses");
+            Console.WriteLine("9. View Behavior Report");
             Console.WriteLine("10. Cancel Class");
             Console.WriteLine("0. Logout");
             Console.Write("Select: ");
@@ -165,7 +165,7 @@ namespace Student_Management_System__SMS_
                 case "6": teacher.ViewAcademicReport(); break;
                 case "7": teacher.UpdateStudentInfo(); break;
                 case "8": teacher.DeleteStudent(); break;
-                case "9": teacher.ReviewExcuses(); break;      // Uses Subject Logic
+                case "9": teacher.ViewBehaviorReport(); break;
                 case "10":teacher.AnnounceNoClass(); break;
                 case "0": currentUser = null; break;
                 default: Console.WriteLine("Invalid option."); break;
@@ -181,7 +181,7 @@ namespace Student_Management_System__SMS_
 
             Console.Clear();
             Console.WriteLine("=====================================================");
-            Console.WriteLine($"=               🧑‍🎓STUDENT SIDE                     =");
+            Console.WriteLine($"=              🧑‍🎓 STUDENT SIDE                     =");
             Console.WriteLine("=====================================================");
             Console.WriteLine("1. View Class Information");
             Console.WriteLine("2. View My Scores");

@@ -484,15 +484,9 @@ namespace Student_Management_System__SMS_.DataAccess
             }
 
             // STEP 1: SELECT SUBJECT
-            // Updated list to match your Teacher Database names better
             string[] subjects = {
-        "Python",
-        "OOP",
-        "Network",
-        "Database System",
-        "Microprocessor",
-        "Writing II",
-        "Core English"
+        "Python", "OOP", "Network", "Database System",
+        "Microprocessor", "Writing II", "Core English"
     };
 
             Console.WriteLine("Select Subject:");
@@ -513,31 +507,54 @@ namespace Student_Management_System__SMS_.DataAccess
             }
             string selectedSubject = subjects[choice - 1];
 
-            // STEP 2: SELECT DATE
-            DateTime date = DateTime.Today;
-            Console.Write($"\nEnter Date (YYYY-MM-DD) [Default: {date:yyyy-MM-dd}]: ");
-            string dateInput = Console.ReadLine()?.Trim();
-            if (!string.IsNullOrEmpty(dateInput) && dateInput != "0")
-            {
-                if (!DateTime.TryParse(dateInput, out date))
-                {
-                    PrintWarning("Invalid format. Using Today.");
-                    date = DateTime.Today;
-                }
-            }
-
-            // STEP 3: ENTER REASON
-            Console.Write("Enter Reason: ");
-            string reason = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(reason)) return;
-
-            // STEP 4: CHECK DUPLICATES & SAVE
             try
             {
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
 
+                    // --- NEW: CHECK LIMIT (Max 10 Times) ---
+                    string limitSql = "SELECT COUNT(*) FROM Excuses WHERE StudentId = @sid AND Subject = @sub";
+                    using (var cmd = new NpgsqlCommand(limitSql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
+                        cmd.Parameters.AddWithValue("sub", selectedSubject);
+                        long usedCount = (long)cmd.ExecuteScalar();
+
+                        if (usedCount >= 10)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"\n[!] LIMIT REACHED: You have used {usedCount}/10 requests for {selectedSubject}.");
+                            Console.WriteLine("You cannot make more requests for this subject.");
+                            Console.ResetColor();
+                            Console.ReadKey();
+                            return;
+                        }
+
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.WriteLine($"\n(You have used {usedCount}/10 requests for this subject)");
+                        Console.ResetColor();
+                    }
+
+                    // STEP 2: SELECT DATE
+                    DateTime date = DateTime.Today;
+                    Console.Write($"\nEnter Date (YYYY-MM-DD) [Default: {date:yyyy-MM-dd}]: ");
+                    string dateInput = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrEmpty(dateInput) && dateInput != "0")
+                    {
+                        if (!DateTime.TryParse(dateInput, out date))
+                        {
+                            PrintWarning("Invalid format. Using Today.");
+                            date = DateTime.Today;
+                        }
+                    }
+
+                    // STEP 3: ENTER REASON
+                    Console.Write("Enter Reason: ");
+                    string reason = Console.ReadLine();
+                    if (string.IsNullOrWhiteSpace(reason)) return;
+
+                    // STEP 4: CHECK DUPLICATES (Same Day)
                     string checkSql = @"
                 SELECT COUNT(*) FROM Excuses 
                 WHERE StudentId = @sid 
@@ -562,6 +579,7 @@ namespace Student_Management_System__SMS_.DataAccess
                         }
                     }
 
+                    // STEP 5: SAVE
                     string sql = "INSERT INTO Excuses (StudentId, ClassDate, Reason, Status, Subject) VALUES (@sid, @date, @r, 'Pending', @sub)";
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
