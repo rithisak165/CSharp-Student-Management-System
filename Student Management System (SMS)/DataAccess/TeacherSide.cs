@@ -782,14 +782,20 @@ namespace Student_Management_System__SMS_.DataAccess
         {
             PrintHeader("REVIEW STUDENT EXCUSES");
 
-            if (string.IsNullOrEmpty(currentUser.Subject) || currentUser.Subject == "General")
+            if (string.IsNullOrEmpty(currentUser.Subject))
             {
-                PrintError("Error: Your account does not have a specific Subject assigned.");
+                PrintError("Error: Your account has no subject.");
                 Console.ReadKey();
                 return;
             }
 
-            // 1. GET DATA
+            // 1. CLEAN TEACHER SUBJECT (Handle "_OOM" suffix & Spaces)
+            string cleanTeacherSubject = currentUser.Subject.Split('_')[0];
+            string compareTeacherVal = cleanTeacherSubject.Replace(" ", "");
+
+            Console.WriteLine($"[System] Teacher Account: {currentUser.Subject}");
+            Console.WriteLine($"[System] Looking for requests matching: '{cleanTeacherSubject}' (ignoring spaces)...\n");
+
             var requests = new List<dynamic>();
 
             try
@@ -797,18 +803,23 @@ namespace Student_Management_System__SMS_.DataAccess
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
-                    // FIXED SQL: Added "AND e.Subject = @sub"
+
+                    // 2. SMART SQL QUERY (Space Insensitive)
                     string sql = @"
-                SELECT e.ExcuseId, s.StudentCode, s.FullName, e.ClassDate, e.Reason, s.StudentId 
+                SELECT e.ExcuseId, s.StudentCode, s.FullName, e.ClassDate, e.Reason, s.StudentId, e.Subject 
                 FROM Excuses e
                 JOIN Students s ON e.StudentId = s.StudentId
-                WHERE e.Status = 'Pending' AND e.Subject = @sub
+                WHERE e.Status = 'Pending' 
+                  AND (
+                      REPLACE(e.Subject, ' ', '') ILIKE @compareVal
+                      OR 
+                      @compareVal ILIKE '%' || REPLACE(e.Subject, ' ', '') || '%' 
+                  )
                 ORDER BY e.ClassDate DESC";
 
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
-                        // Pass the teacher's subject to filter the list
-                        cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+                        cmd.Parameters.AddWithValue("compareVal", compareTeacherVal);
 
                         using (var reader = cmd.ExecuteReader())
                         {
@@ -821,7 +832,8 @@ namespace Student_Management_System__SMS_.DataAccess
                                     Name = reader.GetString(2),
                                     Date = reader.GetDateTime(3),
                                     Reason = reader.GetString(4),
-                                    StudentId = reader.GetInt32(5)
+                                    StudentId = reader.GetInt32(5),
+                                    Subject = reader.GetString(6)
                                 });
                             }
                         }
@@ -836,19 +848,21 @@ namespace Student_Management_System__SMS_.DataAccess
 
             if (requests.Count == 0)
             {
-                PrintSuccess($"No pending requests for {currentUser.Subject}.");
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"\u2713 No pending requests found for '{cleanTeacherSubject}'.");
+                Console.ResetColor();
                 Console.WriteLine("\nPress any key to return...");
                 Console.ReadKey();
                 return;
             }
 
-            // 2. LOOP THROUGH REQUESTS
+            // 3. PROCESS REQUESTS
             foreach (var req in requests)
             {
                 Console.WriteLine($"\nStudent: {req.Code} - {req.Name}");
                 Console.WriteLine($"Date:    {req.Date:yyyy-MM-dd}");
                 Console.WriteLine($"Reason:  {req.Reason}");
-                Console.WriteLine($"Subject: {currentUser.Subject}"); // Now this is actually correct
+                Console.WriteLine($"Subject: {req.Subject}");
                 Console.WriteLine(new string('-', 40));
 
                 string choice = "";
@@ -862,7 +876,9 @@ namespace Student_Management_System__SMS_.DataAccess
                 if (choice == "SKIP") continue;
 
                 string status = (choice == "Y") ? "Accepted" : "Rejected";
-                // If Accepted, they are marked Present. If Rejected, they are Absent.
+
+                // --- FIX HERE ---
+                // Changed "Excused" to "Present" because your database strictly requires "Present"
                 string attendanceStatus = (choice == "Y") ? "Present" : "Absent";
 
                 try
@@ -871,7 +887,7 @@ namespace Student_Management_System__SMS_.DataAccess
                     {
                         conn.Open();
 
-                        // Command 1: Update Excuse Status
+                        // Update Excuse Status
                         string sql1 = "UPDATE Excuses SET Status = @st WHERE ExcuseId = @id";
                         using (var cmd = new NpgsqlCommand(sql1, conn))
                         {
@@ -880,7 +896,7 @@ namespace Student_Management_System__SMS_.DataAccess
                             cmd.ExecuteNonQuery();
                         }
 
-                        // Command 2: Update Attendance
+                        // Update Attendance (Set to Present)
                         string sql2 = @"
                     INSERT INTO Attendance (StudentId, Subject, ClassDate, Status)
                     VALUES (@sid, @sub, @date, @stat)
@@ -890,15 +906,14 @@ namespace Student_Management_System__SMS_.DataAccess
                         using (var cmd = new NpgsqlCommand(sql2, conn))
                         {
                             cmd.Parameters.AddWithValue("sid", req.StudentId);
-                            cmd.Parameters.AddWithValue("sub", currentUser.Subject);
+                            cmd.Parameters.AddWithValue("sub", req.Subject);
                             cmd.Parameters.AddWithValue("date", req.Date);
                             cmd.Parameters.AddWithValue("stat", attendanceStatus);
                             cmd.ExecuteNonQuery();
                         }
                     }
-
-                    if (choice == "Y") PrintSuccess("Saved: Accepted.");
-                    else PrintError("Saved: Rejected.");
+                    if (choice == "Y") PrintSuccess("Saved: Student marked as Present.");
+                    else PrintError("Saved: Student marked as Absent.");
                 }
                 catch (Exception ex)
                 {
@@ -906,7 +921,7 @@ namespace Student_Management_System__SMS_.DataAccess
                 }
             }
 
-            Console.WriteLine("\nAll pending requests reviewed.");
+            Console.WriteLine("\nAll pending requests processed.");
             Console.ReadKey();
         }
         // ==========================================

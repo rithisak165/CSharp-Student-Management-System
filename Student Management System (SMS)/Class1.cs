@@ -35,11 +35,29 @@ namespace Student_Management_System__SMS_
         // ==========================================
         static void ShowLoginMenu()
         {
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
             Console.Clear();
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("=====================================================");
-            Console.WriteLine("=           STUDENT MANAGEMENT SYSTEM LOGIN         =");
-            Console.WriteLine("=====================================================");
+            Console.WriteLine("||               SYSTEM INFORMATION                ||");
+            Console.WriteLine("=====================================================\n");
+
+            Console.WriteLine("-------------------- DEVELOPERS ---------------------\n");
+
+            Console.WriteLine("👨‍💻 Lead System Developer");
+            Console.WriteLine("Name : MENG RITHISAK");
+            Console.WriteLine("Role : Designed and implemented full system logic\n");
+
+            Console.WriteLine("📝 Technical Writer");
+            Console.WriteLine("Name : RIM SOVANNARA");
+            Console.WriteLine("Role : Prepared complete system documentation\n");
+
+            Console.WriteLine("🎨 Console Interface Designer");
+            Console.WriteLine("Name : MENG RITHICHEY");
+            Console.WriteLine("Role : Designed console layout,colors,and text styling\n");
+
+            Console.WriteLine("=======================================================\n");
+
             Console.ResetColor();
 
             Console.Write("Email: ");
@@ -120,7 +138,7 @@ namespace Student_Management_System__SMS_
             Console.ForegroundColor = ConsoleColor.Cyan;
             string subjectDisplay = currentUser.Subject ?? "No Subject";
             Console.WriteLine("=====================================================");
-            Console.WriteLine($"=        TEACHER DASHBOARD ({subjectDisplay})         =");
+            Console.WriteLine($"=           🧑‍🏫 TEACHER DASHBOARD ({subjectDisplay})           =");
             Console.WriteLine("=====================================================");
             Console.ResetColor();
 
@@ -162,7 +180,9 @@ namespace Student_Management_System__SMS_
             StudentSide student = new StudentSide(currentUser);
 
             Console.Clear();
-            Console.WriteLine("=== STUDENT DASHBOARD ===");
+            Console.WriteLine("=====================================================");
+            Console.WriteLine($"=               🧑‍🎓STUDENT SIDE                     =");
+            Console.WriteLine("=====================================================");
             Console.WriteLine("1. View Class Information");
             Console.WriteLine("2. View My Scores");
             Console.WriteLine("3. View My Attendance");

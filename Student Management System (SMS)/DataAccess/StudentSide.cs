@@ -474,29 +474,34 @@ namespace Student_Management_System__SMS_.DataAccess
         public void RequestPermission()
         {
             Console.Clear();
-            PrintHeader("REQUEST PERMISSION / EXCUSE");
-            Console.WriteLine("(Type '0' to Cancel)\n");
+            PrintHeader("REQUEST PERMISSION");
 
             if (_currentUser == null || _currentUser.StudentId == null)
             {
-                PrintError("Error: Student ID not found. Please log in again.");
+                PrintError("Error: Student ID not found.");
                 Console.ReadKey();
                 return;
             }
 
-            // ==========================================
-            // 1. Select Subject (NEW STEP)
-            // ==========================================
-            // We use the same list as your other functions for consistency
-            string[] subjects = { "Python", "OOP", "Network", "Database System", "Microprocessor", "Writing II", "Core English" };
+            // STEP 1: SELECT SUBJECT
+            // Updated list to match your Teacher Database names better
+            string[] subjects = {
+        "Python",
+        "OOP",
+        "Network",
+        "Database System",
+        "Microprocessor",
+        "Writing II",
+        "Core English"
+    };
 
-            Console.WriteLine("Select Subject for the Request:");
+            Console.WriteLine("Select Subject:");
             for (int i = 0; i < subjects.Length; i++)
             {
                 Console.WriteLine($" {i + 1}. {subjects[i]}");
             }
 
-            Console.Write("\nEnter choice: ");
+            Console.Write("\nEnter choice (0 to Cancel): ");
             string choiceInput = Console.ReadLine();
             if (choiceInput == "0") return;
 
@@ -506,49 +511,39 @@ namespace Student_Management_System__SMS_.DataAccess
                 Console.ReadKey();
                 return;
             }
-
             string selectedSubject = subjects[choice - 1];
 
-            // ==========================================
-            // 2. Get Date
-            // ==========================================
+            // STEP 2: SELECT DATE
             DateTime date = DateTime.Today;
             Console.Write($"\nEnter Date (YYYY-MM-DD) [Default: {date:yyyy-MM-dd}]: ");
             string dateInput = Console.ReadLine()?.Trim();
-
-            if (dateInput == "0") return;
-            if (!string.IsNullOrEmpty(dateInput))
+            if (!string.IsNullOrEmpty(dateInput) && dateInput != "0")
             {
                 if (!DateTime.TryParse(dateInput, out date))
                 {
-                    PrintWarning("Invalid date format. Using today's date instead.");
+                    PrintWarning("Invalid format. Using Today.");
                     date = DateTime.Today;
                 }
             }
 
-            // ==========================================
-            // 3. Get Reason
-            // ==========================================
-            string reason = "";
-            while (string.IsNullOrWhiteSpace(reason))
-            {
-                Console.Write("Enter Reason: ");
-                reason = Console.ReadLine()?.Trim();
-                if (reason == "0") return;
-                if (string.IsNullOrWhiteSpace(reason)) PrintWarning("Reason cannot be empty.");
-            }
+            // STEP 3: ENTER REASON
+            Console.Write("Enter Reason: ");
+            string reason = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(reason)) return;
 
-            // ==========================================
-            // 4. Insert into Database
-            // ==========================================
+            // STEP 4: CHECK DUPLICATES & SAVE
             try
             {
                 using (var conn = DbHelper.GetConnection())
                 {
                     conn.Open();
 
-                    // Check for duplicates (Same Student + Same Date + Same Subject)
-                    string checkSql = "SELECT COUNT(*) FROM Excuses WHERE StudentId = @sid AND ClassDate = @date AND Subject = @sub";
+                    string checkSql = @"
+                SELECT COUNT(*) FROM Excuses 
+                WHERE StudentId = @sid 
+                AND ClassDate = @date 
+                AND Subject = @sub";
+
                     using (var cmd = new NpgsqlCommand(checkSql, conn))
                     {
                         cmd.Parameters.AddWithValue("sid", _currentUser.StudentId.Value);
@@ -559,13 +554,14 @@ namespace Student_Management_System__SMS_.DataAccess
 
                         if (count > 0)
                         {
-                            PrintError($"You already have a pending/approved request for {selectedSubject} on this date.");
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"\n[!] ERROR: You already have a request for {selectedSubject} on this date.");
+                            Console.ResetColor();
                             Console.ReadKey();
                             return;
                         }
                     }
 
-                    // Insert Record (Make sure your table has a 'Subject' column!)
                     string sql = "INSERT INTO Excuses (StudentId, ClassDate, Reason, Status, Subject) VALUES (@sid, @date, @r, 'Pending', @sub)";
                     using (var cmd = new NpgsqlCommand(sql, conn))
                     {
@@ -573,21 +569,18 @@ namespace Student_Management_System__SMS_.DataAccess
                         cmd.Parameters.AddWithValue("date", date);
                         cmd.Parameters.AddWithValue("r", reason);
                         cmd.Parameters.AddWithValue("sub", selectedSubject);
-
                         cmd.ExecuteNonQuery();
                     }
 
-                    PrintSuccess($"Request for {selectedSubject} submitted successfully!");
-                    Console.WriteLine("Your teacher will review it.");
+                    PrintSuccess($"Request for {selectedSubject} sent successfully!");
                 }
             }
             catch (Exception ex)
             {
                 PrintError("Database Error: " + ex.Message);
-                Console.WriteLine("\nNote: Does your 'Excuses' table have a 'Subject' column?");
             }
 
-            Console.WriteLine("\nPress any key to return...");
+            Console.WriteLine("Press any key to return...");
             Console.ReadKey();
         }
         // ==========================================
