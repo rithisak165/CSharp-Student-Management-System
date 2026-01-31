@@ -152,6 +152,7 @@ namespace Student_Management_System__SMS_
             Console.WriteLine("8. Delete Student");
             Console.WriteLine("9. View Behavior Report");
             Console.WriteLine("10. Cancel Class");
+            Console.WriteLine("11. How to Use System");
             Console.WriteLine("0. Logout");
             Console.Write("Select: ");
 
@@ -167,6 +168,7 @@ namespace Student_Management_System__SMS_
                 case "8": teacher.DeleteStudent(); break;
                 case "9": teacher.ViewBehaviorReport(); break;
                 case "10":teacher.AnnounceNoClass(); break;
+                case "11": teacher.ShowSystemGuide(); break;
                 case "0": currentUser = null; break;
                 default: Console.WriteLine("Invalid option."); break;
             }

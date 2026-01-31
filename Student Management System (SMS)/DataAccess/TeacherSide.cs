@@ -1058,5 +1058,54 @@ namespace Student_Management_System__SMS_.DataAccess
             Console.WriteLine("\nPress any key to return...");
             Console.ReadKey();
         }
+        public void ShowSystemGuide()
+        {
+            Console.Clear();
+            PrintHeader("SYSTEM USER GUIDE");
+
+            Console.WriteLine("Welcome to the Student Management System. Here is how to use the key features:\n");
+
+            // 1. ATTENDANCE
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("1. RECORDING ATTENDANCE (Option 4)");
+            Console.ResetColor();
+            Console.WriteLine("   - The system automatically selects TODAY'S date.");
+            Console.WriteLine("   - Logic: It loops through every student.");
+            Console.WriteLine("   - If a student sent an Excuse Request, the system PAUSES and asks you:");
+            Console.WriteLine("     \"Allow this excuse? (Y/N)\"");
+            Console.WriteLine("     -> YES: Marks Present (Excuse Accepted).");
+            Console.WriteLine("     -> NO:  Marks Absent (Excuse Rejected).");
+            Console.WriteLine("   - If no excuse, simply press 'Y' (Present) or 'N' (Absent) quickly.\n");
+
+            // 2. BEHAVIOR REPORT
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("2. BEHAVIOR REPORT (Option 9)");
+            Console.ResetColor();
+            Console.WriteLine("   - Shows a split list of students.");
+            Console.WriteLine("   - GREEN ZONE: Students with good attendance.");
+            Console.WriteLine("   - RED ZONE: Students with >3 Absences or >10 Permission Requests.");
+            Console.WriteLine("   - It lists specific dates of absence so you can warn them effectively.\n");
+
+            // 3. SCORES
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("3. MANAGING SCORES (Option 3)");
+            Console.ResetColor();
+            Console.WriteLine("   - Scores are tied to YOUR subject only.");
+            Console.WriteLine("   - You can update Midterm, Final, and Assignment scores.");
+            Console.WriteLine("   - The system automatically calculates the Total and Grade (A-F).\n");
+
+            // 4. STUDENT REQUESTS
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("4. STUDENT PERMISSIONS");
+            Console.ResetColor();
+            Console.WriteLine("   - Students can request permission via their menu.");
+            Console.WriteLine("   - LIMIT: Students are limited to 10 requests per subject.");
+            Console.WriteLine("   - You do not need to check a mailbox; requests appear automatically");
+            Console.WriteLine("     when you run 'Record Attendance'.\n");
+
+            Console.WriteLine("--------------------------------------------------");
+            Console.WriteLine("Press any key to return to menu...");
+            Console.ReadKey();
+        }
     }
 }
